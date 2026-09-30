@@ -1,0 +1,26 @@
+{
+  "name": "omp-grill",
+  "owner": {
+    "name": "Shadorain"
+  },
+  "metadata": {
+    "description": "Native OMP browser interviews for exploring design decisions",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "grill",
+      "description": "Explore design decisions in a staged browser interview with OMP.",
+      "version": "1.0.0",
+      "license": "MIT",
+      "homepage": "https://github.com/Shadorain/omp-grill",
+      "repository": "https://github.com/Shadorain/omp-grill",
+      "category": "productivity",
+      "keywords": ["omp", "omp-extension", "design", "interview", "decisions"],
+      "author": {
+        "name": "Shadorain"
+      },
+      "source": "./"
+    }
+  ]
+}

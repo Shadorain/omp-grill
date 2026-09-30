@@ -1,0 +1,97 @@
+import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
+
+export interface CompletionGrill {
+  id: string;
+  topic: string;
+  status: string;
+}
+
+export interface CompletionQuestion {
+  id: string;
+  title: string;
+  options: { id: string; label: string }[];
+}
+
+export interface CompletionSnapshot {
+  open: CompletionGrill[];
+  saved: CompletionGrill[];
+  questions: CompletionQuestion[];
+}
+
+const SUBS: { name: string; description: string; usage?: string }[] = [
+  { name: "tui", description: "Open the session interview", usage: "[topic|off]" },
+  { name: "use", description: "Select an open grill", usage: "<id>" },
+  { name: "url", description: "Print the selected grill URL" },
+  { name: "questions", description: "List the selected grill's questions" },
+  { name: "answer", description: "Record an answer", usage: "<question> <option>" },
+  { name: "reply", description: "Message the agent", usage: "<question> <text>" },
+  { name: "pause", description: "Pause the selected grill" },
+  { name: "resume", description: "Open a paused or errored grill" },
+  { name: "history", description: "Open a finished grill's locked page" },
+  { name: "sessions", description: "List saved grills for this project" },
+  { name: "finish", description: "Finish the selected grill and write the report" },
+];
+
+function item(value: string, label: string, description?: string): AutocompleteItem {
+  return { value, label, ...(description ? { description } : {}) };
+}
+
+function prefixMatches(prefix: string, name: string): boolean {
+  return name.toLowerCase().startsWith(prefix.toLowerCase());
+}
+
+export function grillCompletions(
+  argumentPrefix: string,
+  snapshot: CompletionSnapshot,
+): AutocompleteItem[] | null {
+  const space = argumentPrefix.indexOf(" ");
+  if (space === -1) {
+    const matches = SUBS.filter((sub) => prefixMatches(argumentPrefix, sub.name)).map((sub) =>
+      item(`${sub.name} `, sub.name, sub.description),
+    );
+    return matches.length ? matches : null;
+  }
+  const verb = argumentPrefix.slice(0, space).toLowerCase();
+  const rest = argumentPrefix.slice(space + 1);
+  if (rest.includes(" ") && verb !== "answer") return null;
+  if (verb === "use") {
+    const matches = snapshot.open
+      .filter((grill) => prefixMatches(rest, grill.id) || prefixMatches(rest, grill.topic))
+      .map((grill) => item(`use ${grill.id} `, `${grill.topic} · ${grill.id.slice(0, 8)}`, grill.status));
+    return matches.length ? matches : null;
+  }
+  if (verb === "tui") {
+    if (rest.includes(" ")) return null;
+    return prefixMatches(rest, "off") ? [item("tui off ", "off", "Leave the session interview")] : null;
+  }
+  if (verb === "history" || verb === "resume") {
+    const wanted = verb === "history" ? "finished" : ["paused", "error"];
+    const matches = snapshot.saved
+      .filter((grill) => (Array.isArray(wanted) ? wanted.includes(grill.status) : grill.status === wanted))
+      .filter((grill) => prefixMatches(rest, grill.id) || prefixMatches(rest, grill.topic))
+      .map((grill) => item(`${verb} ${grill.id} `, `${grill.topic} · ${grill.id.slice(0, 8)}`, grill.status));
+    return matches.length ? matches : null;
+  }
+  if (verb === "answer" || verb === "reply") {
+    const parts = rest.split(" ");
+    const questionPrefix = parts[0] ?? "";
+    if (parts.length === 1) {
+      const matches = snapshot.questions
+        .filter((question) => prefixMatches(questionPrefix, question.id) || prefixMatches(questionPrefix, question.title))
+        .map((question) => item(`${verb} ${question.id} `, question.id, question.title));
+      return matches.length ? matches : null;
+    }
+    if (verb !== "answer" || parts.length !== 2) return null;
+    const question = snapshot.questions.find((item) => item.id === questionPrefix);
+    if (!question) return null;
+    const optionPrefix = parts[1] ?? "";
+    const options = [
+      ...(prefixMatches(optionPrefix, "--") ? [item(`answer ${question.id} -- `, "--", "Free-text answer")] : []),
+      ...question.options
+        .filter((option) => prefixMatches(optionPrefix, option.id) || prefixMatches(optionPrefix, option.label))
+        .map((option) => item(`answer ${question.id} ${option.id} `, option.id, option.label)),
+    ];
+    return options.length ? options : null;
+  }
+  return null;
+}

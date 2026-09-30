@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark">
+  <title>Grill — decision interview</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div><div class="ambient ambient-two" aria-hidden="true"></div>
+  <header class="topbar">
+    <div class="topbar-left">
+      <a class="brand-mark" href="/" aria-label="Grill home"><img src="/favicon.svg" alt="" width="30" height="30"></a>
+      <div class="topic-block">
+        <strong id="topic-title" class="topic-title">Decision interview</strong>
+        <span id="topic-note" class="topic-note" hidden></span>
+      </div>
+    </div>
+    <div class="seg" role="group" aria-label="Main view">
+      <button id="seg-questions" class="seg-btn is-active" type="button">Questions</button>
+      <button id="seg-visual" class="seg-btn" type="button"><span id="seg-visual-label">Visualize</span><i id="visual-stale-dot" class="stale-dot" hidden></i></button>
+    </div>
+    <div class="topbar-right">
+      <button id="notes-btn" class="btn btn-ghost" type="button">Notes</button>
+      <button id="report-btn" class="btn btn-ghost" type="button">Report</button>
+      <span id="status" class="status-chip" data-status="loading" aria-live="polite"><i class="status-dot"></i><span id="status-text">Connecting</span></span>
+    </div>
+  </header>
+  <div id="banner" class="banner" role="alert" hidden></div>
+  <main class="layout">
+    <aside id="qlist" class="qlist" aria-label="Questions">
+      <div class="col-cap"><span>Questions</span><span id="progress-count">0 / 0</span></div>
+      <nav id="question-nav" class="question-nav"></nav>
+      <div id="recovery-block" hidden>
+        <div class="col-cap"><span>Recoverable drafts</span></div>
+        <ul id="recovery-list" class="recovery-list"></ul>
+      </div>
+    </aside>
+    <section id="card-col" class="card-col" aria-label="Question">
+      <div id="empty-state" class="empty-state" hidden><span class="empty-glyph">✳</span><p>Waiting for the agent&rsquo;s first questions&hellip;</p></div>
+      <article id="question-card" class="panel qcard" hidden>
+        <p class="qmeta"><span id="q-id" class="mono"></span><span id="q-deps"></span><span id="q-state" class="mono"></span></p>
+        <h2 id="question-title" class="qtitle" tabindex="-1"></h2>
+        <p id="question-body" class="qbody" hidden></p>
+        <div id="options" class="options"></div>
+        <p id="why-line" class="why-line" hidden></p>
+        <p id="change-hint" class="hint" hidden>Recorded. Pick another option to stage a change.</p>
+        <textarea id="answer-text" rows="3" placeholder="Add detail, or answer in your own words&hellip;"></textarea>
+        <div class="qfoot">
+          <div class="qactions">
+            <button id="explore-action" class="btn btn-secondary" type="button">Explore tradeoffs</button>
+            <button id="defer-action" class="btn btn-secondary" type="button">Defer</button>
+            <button id="reopen-action" class="btn btn-secondary" type="button" hidden>Reopen</button>
+          </div>
+          <div class="qnav">
+            <button id="back-action" class="btn btn-ghost" type="button">&larr; Back</button>
+            <button id="next-action" class="btn btn-ghost" type="button">Next &rarr;</button>
+          </div>
+        </div>
+      </article>
+    </section>
+    <section id="visual-main" class="visual-main" aria-label="Visual" hidden>
+      <div id="visual-toolbar" class="visual-toolbar" hidden>
+        <div class="seg" role="group" aria-label="Visual kind">
+          <button id="seg-proto" class="seg-btn" type="button">Prototype</button>
+          <button id="seg-diag" class="seg-btn" type="button">Diagram</button>
+        </div>
+        <span id="visual-version" class="version-badge" hidden></span>
+        <span id="visual-stale" class="stale-badge" hidden>Out of date</span>
+        <span id="visual-drawing" class="hint" hidden>Drawing&hellip;</span>
+        <span class="spacer"></span>
+        <button id="regen-btn" class="btn btn-secondary" type="button">Regenerate</button>
+        <button id="download-visual" class="btn btn-secondary" type="button" disabled>Download</button>
+      </div>
+      <p id="visual-assumed" class="hint" hidden></p>
+      <div id="visual-empty" class="visual-empty" hidden>
+        <div class="gen-cards">
+          <div class="gen-card"><strong>Diagram</strong><p>Flow, state, or how the parts connect. Works for any topic, not just a screen.</p><button id="gen-diag" class="btn btn-primary" type="button">Draw diagram</button></div>
+          <div class="gen-card"><strong>Prototype</strong><p>A clickable screen. Skip this unless the interview is about something people will see.</p><button id="gen-proto" class="btn btn-secondary" type="button">Generate prototype</button></div>
+        </div>
+      </div>
+      <div id="visual-prompt" class="visual-empty" hidden>
+        <div class="gen-card"><strong id="visual-prompt-title"></strong><p id="visual-prompt-desc"></p><button id="gen-kind" class="btn btn-primary" type="button">Generate</button></div>
+      </div>
+      <div id="artifact-holder" class="artifact-holder" hidden></div>
+      <p id="visual-status" class="hint" aria-live="polite"></p>
+    </section>
+    <aside class="side" aria-label="Discussion">
+      <div id="disc-panel" class="side-panel">
+        <div class="col-cap"><span>Discussion</span><span id="thread-count">0</span></div>
+        <p id="disc-title" class="disc-title"></p>
+        <div class="side-scroll">
+          <div id="thread-list" class="thread-list"></div>
+          <div id="explore-results" class="explore-results" hidden></div>
+          <details id="history-details" class="history-details" hidden><summary>Earlier answers</summary><div id="history-list"></div></details>
+          <div id="staged-bubble" class="msg staged-bubble" hidden><span class="msg-role">Staged</span><p id="staged-bubble-text"></p><button id="staged-bubble-x" class="bubble-x" type="button" aria-label="Remove staged message">&times;</button></div>
+        </div>
+        <div class="composer"><textarea id="thread-input" rows="2" placeholder="Ask about this question&hellip;"></textarea></div>
+      </div>
+      <div id="vis-panel" class="side-panel" hidden>
+        <div class="col-cap"><span>Visual feedback</span><span id="visual-thread-count">0</span></div>
+        <div class="side-scroll"><div id="visual-thread-list" class="thread-list"></div></div>
+        <div class="composer">
+          <textarea id="visual-feedback" rows="3" placeholder="What should change?"></textarea>
+          <button id="redraw-btn" class="btn btn-primary" type="button" disabled>Redraw with feedback</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+  <footer class="bottombar">
+    <div id="send-bar" class="send-bar">
+      <div class="send-left"><div id="staged-summary" class="staged-summary">Connecting&hellip;</div><span id="sync-note" class="hint"></span></div>
+      <div class="send-bar-right">
+        <span class="kbd-hint">&#8984;&#8617; send</span>
+        <button id="finish-btn" class="btn btn-secondary" type="button">Finish</button>
+        <button id="send-btn" class="btn btn-primary" type="button" disabled>Send to agent</button>
+      </div>
+    </div>
+    <div id="finished-bar" class="finished-bar" hidden>
+      <span>Interview finished &middot; report saved</span>
+      <button id="open-report-btn" class="btn btn-secondary" type="button">Open report</button>
+    </div>
+  </footer>
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="notes-drawer" class="drawer" role="dialog" aria-label="Notes" hidden>
+    <div class="drawer-head"><h2>Notes</h2><button id="notes-close" class="icon-btn" type="button" aria-label="Close notes">&times;</button></div>
+    <p class="hint">Saved here. The agent sees them on your next send. Nothing is sent by saving.</p>
+    <section class="drawer-section"><h3>Goal</h3>
+      <textarea id="intent-input" rows="3" placeholder="What outcome are you working toward?"></textarea>
+      <div class="row"><button id="save-context" class="btn btn-secondary" type="button">Save</button><span id="context-status" class="hint" aria-live="polite"></span></div>
+    </section>
+    <section class="drawer-section"><h3>Glossary</h3>
+      <div id="terms-list"></div>
+      <div class="note-form"><input id="term-input" placeholder="Term" aria-label="Term"><input id="term-meaning" placeholder="Meaning" aria-label="Meaning"><input id="term-avoid" placeholder="Avoid (optional)" aria-label="Avoid meanings"><button id="add-term" class="btn btn-secondary" type="button">Add</button></div>
+    </section>
+    <section class="drawer-section"><h3>Facts</h3>
+      <div id="facts-list"></div>
+      <div class="note-form"><input id="fact-input" placeholder="Fact" aria-label="Fact"><input id="fact-source" placeholder="Source (optional)" aria-label="Source"><button id="add-fact" class="btn btn-secondary" type="button">Add</button></div>
+    </section>
+    <section class="drawer-section"><h3>Risks</h3>
+      <div id="risks-list"></div>
+      <div class="note-form"><input id="risk-input" placeholder="Risk" aria-label="Risk"><input id="risk-mitigation" placeholder="Mitigation (optional)" aria-label="Mitigation"><button id="add-risk" class="btn btn-secondary" type="button">Add</button></div>
+    </section>
+  </aside>
+  <aside id="report-drawer" class="drawer drawer-sheet" role="dialog" aria-label="Report" hidden>
+    <div class="drawer-head"><h2>Report</h2><div class="row drawer-head-actions"><button id="load-report" class="btn btn-ghost" type="button">Refresh</button><button id="report-download" class="btn btn-ghost" type="button">Download</button><button id="report-close" class="icon-btn" type="button" aria-label="Close report">&times;</button></div></div>
+    <div id="report-preview" class="report-preview">Report loads when you open this panel.</div>
+    <section class="drawer-foot"><h3>Export to project</h3>
+      <p id="export-locked" class="hint">Export is available after you finish.</p>
+      <div id="export-row" hidden>
+        <input id="export-path" placeholder="docs/decision-report.md">
+        <div class="row">
+          <button id="export-report" class="btn btn-secondary" type="button">Export report</button>
+          <button id="export-proto" class="btn btn-secondary" type="button" hidden>Export prototype</button>
+          <button id="export-diagram" class="btn btn-secondary" type="button" hidden>Export diagram</button>
+        </div>
+      </div>
+      <p id="export-feedback" class="hint" aria-live="polite"></p>
+    </section>
+  </aside>
+  <dialog id="finish-dialog" class="dialog">
+    <form method="dialog"><button class="icon-btn dialog-x" aria-label="Close">&times;</button></form>
+    <h2>Finish this interview?</h2>
+    <p id="finish-summary" class="hint"></p>
+    <div id="finish-drafts" class="finish-drafts"></div>
+    <div class="dialog-actions">
+      <button id="cancel-finish" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="confirm-finish" class="btn btn-primary" type="button">Finish and write report</button>
+    </div>
+  </dialog>
+</body>
+</html>
