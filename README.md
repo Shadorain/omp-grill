@@ -223,18 +223,6 @@ After changing `host` or `port`, pause and resume the interview to restart its s
 
 Settings live in `~/.omp/grill/settings.json`. You can edit that file directly. Set `OMP_GRILL_HOME` to move settings and session files to another directory.
 
-### Network safety
-
-The default listener is reachable on your LAN. HTTP is unencrypted. Use a trusted network, never expose Grill to the public internet, and keep interview URLs private.
-
-For a remote OMP host, set `host` to `127.0.0.1` and forward the port over SSH:
-
-```sh
-ssh -N -L 43127:127.0.0.1:43127 user@omp-host
-```
-
-Replace `43127` with the port OMP prints, then open the forwarded URL on localhost.
-
 ## Development
 
 ```sh
