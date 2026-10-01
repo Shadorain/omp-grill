@@ -302,6 +302,8 @@ describe("grill browser server", () => {
       '{"port":-1}',
       '{"port":65536}',
       '{"port":"43127"}',
+      '{"allowAgentStart":"false"}',
+      '{"allowAgentStart":null}',
     ]) {
       writeFileSync(join(root, "settings.json"), contents);
       await expect(

@@ -5,9 +5,14 @@ import { isIP } from "node:net";
 export interface ServerSettings {
   host: string;
   port: number;
+  allowAgentStart: boolean;
 }
 
-const DEFAULT_SETTINGS: ServerSettings = { host: "0.0.0.0", port: 0 };
+const DEFAULT_SETTINGS: ServerSettings = {
+  host: "0.0.0.0",
+  port: 0,
+  allowAgentStart: false,
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -55,6 +60,9 @@ export async function readServerSettings(
 
   const host = "host" in value ? value.host : DEFAULT_SETTINGS.host;
   const port = "port" in value ? value.port : DEFAULT_SETTINGS.port;
+  const allowAgentStart = "allowAgentStart" in value
+    ? value.allowAgentStart
+    : DEFAULT_SETTINGS.allowAgentStart;
   if (!validHost(host))
     throw new Error(
       `Invalid server settings at ${path}: host must be an IP address or hostname`,
@@ -68,5 +76,9 @@ export async function readServerSettings(
     throw new Error(
       `Invalid server settings at ${path}: port must be 0 or an integer from 1 to 65535`,
     );
-  return { host, port };
+  if (typeof allowAgentStart !== "boolean")
+    throw new Error(
+      `Invalid server settings at ${path}: allowAgentStart must be a boolean`,
+    );
+  return { host, port, allowAgentStart };
 }

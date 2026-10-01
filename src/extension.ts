@@ -12,6 +12,7 @@ import { join } from "node:path";
  import { listSessions, resumeStore } from "./sessions.ts";
  import { createGrillInspector, createGrillWidget, type GrillTheme } from "./tui.ts";
  import type { Action, GrillServer, Publish, Store } from "./types.ts";
+import { readServerSettings } from "./settings.ts";
 
 function grillHome() {
   return process.env.OMP_GRILL_HOME || join(homedir(), ".omp", "grill");
@@ -68,6 +69,20 @@ export default function grillExtension(pi: ExtensionAPI) {
    let projectDir = process.cwd();
    let tuiMode = false;
    let overlayTui: { requestRender(): void } | undefined;
+  let allowAgentStart = false;
+
+  async function syncTools() {
+    const names = ["grill_publish", "grill_state"];
+    const active = pi.getActiveTools();
+    const enabled = allowAgentStart || [...attached.values()].some(
+      (runtime) => runtime.store.state.status !== "finished",
+    );
+    if (names.every((name) => active.includes(name) === enabled)) return;
+    await pi.setActiveTools([
+      ...active.filter((name) => !names.includes(name)),
+      ...(enabled ? names : []),
+    ]);
+  }
 
   function runtimeOf(id: string | undefined) {
     return id ? attached.get(id) : undefined;
@@ -105,6 +120,7 @@ export default function grillExtension(pi: ExtensionAPI) {
     if (pause && runtime.store.state.status !== "finished")
       runtime.store.setStatus("paused");
     await runtime.server?.close();
+    await syncTools();
     if (attached.size) status();
     else {
       tuiMode = false;
@@ -179,6 +195,7 @@ export default function grillExtension(pi: ExtensionAPI) {
     select(runtime);
     pi.appendEntry(ENTRY, { dir: store.dir });
     const url = await serve(runtime);
+    await syncTools();
     store.setStatus("working");
     status();
     notifyUrl(ctx, url, runtime);
@@ -512,6 +529,7 @@ export default function grillExtension(pi: ExtensionAPI) {
             draftRevision: snapshot.drafts.revision,
           });
         const report = runtime.store.finish();
+        await syncTools();
         status();
         ctx.ui.notify(`Grill finished: ${report}`, "info");
         return;
@@ -600,6 +618,7 @@ export default function grillExtension(pi: ExtensionAPI) {
             picked.store.state.pending ? "working" : "waiting",
           );
         const url = await serve(picked);
+        await syncTools();
         notifyUrl(ctx, url, picked);
         if (picked.store.state.pending) {
           runningBatch = {
@@ -655,6 +674,7 @@ export default function grillExtension(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "grill_publish",
+    defaultInactive: true,
     label: "Grill questions",
     description:
       "Start another interview with topic and 1-3 questions, or publish to the grill named by id. Several grills may be open. Acknowledge browser batches with handled. Never generate UI files.",
@@ -793,6 +813,8 @@ export default function grillExtension(pi: ExtensionAPI) {
           throw new Error("Several open grills share that topic. Pass id.");
         if (matches.length === 1) select(matches[0]);
         else {
+          if (!allowAgentStart)
+            throw new Error("Start an interview with /grill <topic>.");
           if (!patch.questions?.length)
             throw new Error("Starting a grill requires its first questions.");
           await start(topic, ctx);
@@ -820,6 +842,7 @@ export default function grillExtension(pi: ExtensionAPI) {
   });
   pi.registerTool({
     name: "grill_state",
+    defaultInactive: true,
     label: "Grill decisions",
     description:
       "Read compact decisions, open questions and pending batch after context loss. No HTML or full state replay.",
@@ -833,7 +856,12 @@ export default function grillExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.on("before_agent_start", (event, ctx) => {
+  pi.on("session_start", async () => {
+    ({ allowAgentStart } = await readServerSettings(grillHome()));
+    await syncTools();
+  });
+  pi.on("before_agent_start", async (event, ctx) => {
+    await syncTools();
     const runtime = runtimeOf(currentId);
     if (
       ctx.agent.kind === "sub" ||

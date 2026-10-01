@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add `allowAgentStart` (default `false`). Grill tools stay inactive until a user command opens or resumes an interview, and are hidden again when the last open interview is paused or finished. Set it to `true` to allow agent-started interviews.
 - Replace the manual outbox with draft-on-edit: answers and messages autosave to the server with revision CAS, survive reload and resume, and go out together with one Send.
 - Add request-idempotent `/api/send` retries, per-question answer history, and recovery entries for cleared drafts.
 - Add intent/glossary/facts/risks context (`/api/context`), a live report preview (`/api/report`), deterministic SVG system diagrams (`/api/diagram`, `visualize`/`visual-feedback` actions), and explicit project export (`/api/export`) with symlink/traversal guards.
