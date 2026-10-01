@@ -1,6 +1,6 @@
 # omp-grill
 
-Design interviews for [OMP](https://github.com/can1357/oh-my-pi). One decision at a time, with a recommendation and a discussion thread. Choices stay staged until one Send. The extension keeps the page, the drafts, and a local `report.md`.
+Run design interviews with [OMP](https://github.com/can1357/oh-my-pi) in your browser or terminal. Grill presents questions with recommended answers and discussion threads, saves your drafts, and writes a local decision report when you finish.
 
 ![Task board interview](docs/interview.png)
 
@@ -13,68 +13,86 @@ Requires OMP 18.4.4 or later. Restart OMP after installing or updating.
 /marketplace install grill@omp-grill
 ```
 
-Then `/grill <topic>`, or ask OMP to start an interview. The model opens the page with `grill_publish`. No bundled skill.
+Start an interview with `/grill <topic>` or `/grill tui <topic>`. To let the agent start interviews from a natural-language request, enable `allowAgentStart` below.
 
 ## Use
 
-Open the URL OMP prints. The fragment is a bearer token. Keep that URL private.
+1. Open the URL printed by OMP. Keep the full URL private because it contains an access token.
+2. Choose an option, write an answer, or add a discussion message. Grill saves these as drafts without sending them to the agent.
+3. Click **Send N to agent**, or press Cmd/Ctrl+Enter, to send your drafts together.
+4. Click **Finish** to save the interview as `report.md`.
 
-Pick an option or type an answer. It is staged, not sent, until **Send N to agent** (⌘/Ctrl+Enter). A discussion message stages the same way. Explore, Defer, Reopen, and Visual go out immediately. Finish writes `report.md`.
+Explore, Defer, Reopen, and visual requests reach the agent immediately rather than waiting for Send.
 
-Several grills can be open. Commands and the agent act on the selected one.
+You can keep several interviews open. Use `/grill use <id>` to select the one that commands and agent replies should target.
 
+| Command | Description |
+| --- | --- |
+| `/grill <topic>` | Start an interview. |
+| `/grill tui` | Open the selected interview in the terminal. |
+| `/grill tui <topic>` | Start an interview and open it in the terminal. |
+| `/grill tui off` | Turn off the terminal view without closing the interview. |
+| `/grill use <id>` | Select an open interview. |
+| `/grill url` | Show its private URL. |
+| `/grill questions` | List its questions. |
+| `/grill answer <id> <option> [note]` | Record an option with an optional note. |
+| `/grill answer <id> -- <text>` | Record a written answer. |
+| `/grill reply <id> <text>` | Send a message about a question. |
+| `/grill pause` | Pause the selected interview. |
+| `/grill resume` | Resume a paused or errored interview. |
+| `/grill history` | View a finished interview. |
+| `/grill sessions` | List saved interviews for this project. |
+| `/grill finish` | Finish the interview and save its report. |
 
-| Command                              |                                                      |
-| ------------------------------------ | ---------------------------------------------------- |
-| `/grill <topic>`                     | Start another interview.                             |
-| `/grill tui [topic|off]`             | Open it in the session terminal, or leave that view. |
-| `/grill use <id>`                    | Select which open grill commands target.             |
-| `/grill url`                         | Print the private URL.                               |
-| `/grill questions`                   | List questions.                                      |
-| `/grill answer <id> <option> [note]` | Record an option.                                    |
-| `/grill answer <id> -- <text>`       | Free-text answer.                                    |
-| `/grill reply <id> <text>`           | Message the agent about a question.                  |
-| `/grill pause`                       | Pause the selected grill.                            |
-| `/grill resume`                      | Open a paused or errored grill.                      |
-| `/grill history`                     | Open a finished grill's locked page.                 |
-| `/grill sessions`                    | List saved grills for this project.                  |
-| `/grill finish`                      | Finish and write `report.md`.                        |
-
-
-`/grill` with no arguments lists what is open. Autocomplete fills the rest.
+Run `/grill` to list open interviews and commands. Tab completion suggests commands, interview IDs, questions, and options.
 
 ![Task board prototype](docs/prototype.png)
 
-Visual defaults to a diagram. A prototype is a sandboxed screen preview: clicks inside it never call the agent. Skip it unless the interview is about something people will see.
+The Visual view can show a system diagram or an interactive screen prototype. Prototypes run in a sandbox, so clicking inside one does not call the agent. Use diagrams for flows and architecture, and prototypes to explore a screen design.
 
 ### `/grill tui`
 
-If you don't want a fancy GUI, opt for a fancy TUI right from your session! All the same commands work, switch anytime back to GUI also!
+Prefer the terminal? Run `/grill tui` to open the selected interview inside your OMP session. The browser remains available, so you can use either view.
 
 ![Session terminal](docs/tui.png)
 
-In the terminal, `j`/`k` move, `a`-`d` stage, `enter` sends, `e` explores, `x` defers, `f` twice finishes, `tab` shows the discussion. `esc` closes the inspector. The browser page stays up.
+Use `j`/`k` to move between questions and `a`-`d` to stage an option. Press `enter` to send, `e` to explore, `x` to defer, or `f` twice to finish. Use `tab` to view the discussion and `esc` or `q` to close the inspector. Closing the inspector leaves the interview open.
 
 ## Configuration
 
-Optional `~/.omp/grill/settings.json`. Missing file means the defaults. Read when a server starts. `/grill pause` then `/grill resume` picks up an edit.
-
-
-| Key    | Default   |                                                                              |
-| ------ | --------- | ---------------------------------------------------------------------------- |
-| `host` | `0.0.0.0` | Bind address.                                                                |
-| `port` | `0`       | Free port. A fixed port applies to the first grill only, and fails if taken. |
-
+Create `~/.omp/grill/settings.json` to override the defaults:
 
 ```json
-{ "host": "127.0.0.1", "port": 43127 }
+{
+  "host": "127.0.0.1",
+  "port": 43127,
+  "allowAgentStart": false
+}
 ```
 
-`OMP_GRILL_HOME` moves settings and sessions together. Default is `~/.omp/grill`.
+| Setting | Default | Description |
+| --- | --- | --- |
+| `host` | `0.0.0.0` | The address the server listens on. |
+| `port` | `0` | Use a free port. A fixed port applies to the first interview; later interviews use free ports. |
+| `allowAgentStart` | `false` | Allow the agent to start interviews with `grill_publish`. Otherwise, start or resume an interview with `/grill` before its tools become available. |
 
-`0.0.0.0` listens on every IPv4 interface. Trusted LAN only. HTTP is unencrypted, so the token is not enough for a public network. For a remote host, forward the real port: `ssh -N -L 43127:127.0.0.1:43127 user@omp-host`.
+With `allowAgentStart: false`, Grill tools and their descriptions stay out of the model's context until you start or resume an interview. Questions, replies, and visual requests work normally afterward. Pausing or finishing the last open interview hides the tools again. Set it to `true` to keep the tools available and allow natural-language starts.
 
-Session files stay on the machine. The page, drafts, and report do not spend model tokens. Questions, replies, and requested visuals go through OMP's configured provider.
+Restart OMP after changing `allowAgentStart`. If a fixed port is already in use, Grill reports an error. After changing `host` or `port`, pause and resume the interview to restart its server.
+
+Set `OMP_GRILL_HOME` to store settings and sessions somewhere other than `~/.omp/grill`.
+
+**Network safety:** The default address exposes Grill on all IPv4 interfaces. Use it only on a trusted LAN, never the public internet. HTTP is unencrypted. Set `host` to `127.0.0.1` for local access.
+
+For a remote OMP host, forward the server's port over SSH:
+
+```sh
+ssh -N -L 43127:127.0.0.1:43127 user@omp-host
+```
+
+Replace `43127` with the actual server port.
+
+Session files stay on your machine. The interface, draft storage, and report generation do not use model tokens. Questions, replies, and visual requests use your configured OMP provider.
 
 ## Development
 
@@ -86,9 +104,9 @@ bun test
 bun run demo
 ```
 
-`bun run demo` prints a `DEMO_URL` and uses a scripted provider. No inference tokens. Ctrl+C removes the temporary demo directory.
+Run `bun run demo` to try Grill with a scripted local provider. Open the printed `DEMO_URL`. The demo uses no inference tokens, and Ctrl+C stops it and removes its temporary files.
 
-Inspired by [grill-with-ui](https://github.com/jasonku09/grill-with-ui). Grill renders its own diagram and prototype specs. It does not run model-written HTML.
+Inspired by [grill-with-ui](https://github.com/jasonku09/grill-with-ui). Grill renders diagrams and prototypes from structured specs rather than running model-written HTML.
 
 ## License
 
