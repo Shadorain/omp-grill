@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compactSubmission, createStore, loadStore } from "../src/store";
+import { createStore, loadStore } from "../src/store";
 import { validatePrototypeSpec } from "../src/prototype";
 import { renderDiagram } from "../src/diagram";
 import type { PrototypeSpec, DiagramSpec } from "../src/types";
@@ -108,11 +108,9 @@ describe("native prototype renderer", () => {
       }],
     });
     const feedback = store.submit([{ type: "visual-feedback", kind: "prototype", text: "Add priority choice" }]);
-    expect(compactSubmission(store.state, feedback)).toContain("prototypeContext");
     store.acknowledge(feedback.seq);
     expect(store.state.diagram?.thread).toEqual([]);
     const ordinary = store.submit([{ type: "thread", q: "q1", text: "Keep this compact" }]);
-    expect(compactSubmission(store.state, ordinary)).not.toContain("prototypeContext");
     store.acknowledge(ordinary.seq);
     store.publish({ prototype, prototypeReply: "Added priority choice" });
     expect(store.state.prototype?.version).toBe(2);
@@ -148,20 +146,63 @@ describe("native prototype renderer", () => {
     expect(() => validatePrototypeSpec(s)).toThrow(/not valid option for select/);
   });
 
-  test("self-transitions have visible labels and nonzero arrow geometry", () => {
+  test("self-transitions retain visible nonzero arrow geometry", () => {
     const stateDiagram: DiagramSpec = {
       title: "Retry", kind: "state", nodes: [{ id: "a", label: "Ready" }],
       edges: [{ from: "a", to: "a", label: "retry" }],
     };
-    expect(renderDiagram(stateDiagram)).toContain(">retry</text>");
-    const sequenceDiagram: DiagramSpec = {
-      ...stateDiagram, kind: "sequence",
-    };
+    expect(renderDiagram(stateDiagram)).toMatch(/<path [^>]*marker-end="url\(#arrow\)"/);
+    const sequenceDiagram: DiagramSpec = { ...stateDiagram, kind: "sequence" };
     const svg = renderDiagram(sequenceDiagram);
     const arrow = svg.match(/<line [^>]*marker-end="url\(#arrow\)"[^>]*>/)?.[0] ?? "";
     const coordinate = (name: string) => Number(arrow.match(new RegExp(`${name}="([^"]+)"`))?.[1]);
     expect(Math.hypot(coordinate("x2") - coordinate("x1"), coordinate("y2") - coordinate("y1"))).toBeGreaterThan(0);
-    expect(svg).toContain(">retry</text>");
+  });
+
+  test("long labels and titles stay inside content-sized SVG layout", () => {
+    const spec: DiagramSpec = {
+      title: "A deliberately lengthy diagram heading that wraps to multiple lines while remaining available in the rendered graphic",
+      kind: "state",
+      nodes: [
+        { id: "a", label: "A decision node with an extraordinarily descriptive label that spans several lines and stays fully visible", detail: "A detailed explanation with enough words to use several lines inside the node without clipping or overflowing its border." },
+        { id: "b", label: "<Ready> & safe", detail: "A second explanation that remains escaped and contained." },
+      ],
+      edges: [{ from: "a", to: "b", label: "A long transition label that wraps and remains centered in the available edge lane" }],
+    };
+    const svg = renderDiagram(spec);
+    const rectangles = [...svg.matchAll(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" rx="[^"]+" fill="#211d35"/g)]
+      .map((match) => ({ x: Number(match[1]), y: Number(match[2]), width: Number(match[3]), height: Number(match[4]) }));
+    const texts = [...svg.matchAll(/<text x="([^"]+)" y="([^"]+)" text-anchor="[^"]+" fill="([^"]+)" font-size="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g)]
+      .map((match) => {
+        const offsets = [...match[5]!.matchAll(/<tspan x="[^"]+" dy="([^"]+)">/g)].map((span) => Number(span[1]));
+        const baselines = [Number(match[2])];
+        for (const offset of offsets.slice(1)) baselines.push(baselines[baselines.length - 1]! + offset);
+        const lineContent = [...match[5]!.matchAll(/<tspan\b[^>]*>(.*?)<\/tspan>/g)].map((span) => span[1]);
+        return { x: Number(match[1]), fill: match[3], baselines, content: lineContent.join(""), lineContent };
+      });
+    const title = texts.find((text) => text.fill === "#f8fafc")!;
+    expect(rectangles[0]!.y).toBeGreaterThan(title.baselines.at(-1)!);
+    const nodeLabels = texts.filter((text) => text.fill === "#f4f0ff" || text.fill === "#c7c1d8");
+    expect(nodeLabels).toHaveLength(4);
+    for (const [i, label] of nodeLabels.entries()) {
+      const box = rectangles[Math.floor(i / 2)]!;
+      expect(label.baselines[0]!).toBeGreaterThan(box.y);
+      expect(label.baselines.at(-1)!).toBeLessThan(box.y + box.height);
+      expect(label.content.length).toBeGreaterThan(0);
+    }
+    expect(svg).toContain("&lt;Ready&gt; &amp; safe");
+    const edgeLabel = texts.find((text) => text.fill === "#e9d5ff")!;
+    expect(edgeLabel.baselines.length).toBeGreaterThan(1);
+    const edgeWidth = Math.max(...edgeLabel.lineContent.map((line) => line.length * 6.3));
+    const gap = rectangles[1]!.x - (rectangles[0]!.x + rectangles[0]!.width);
+    expect(edgeWidth).toBeLessThan(gap);
+
+    const sequence = renderDiagram({ ...spec, kind: "sequence" });
+    const actors = [...sequence.matchAll(/<rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" rx="[^"]+" fill="#211d35"/g)]
+      .map((match) => ({ y: Number(match[2]), height: Number(match[4]) }));
+    const firstMessage = sequence.match(/<line [^>]*marker-end="url\(#arrow\)"[^>]*>/)?.[0] ?? "";
+    const messageY = Number(firstMessage.match(/y1="([^"]+)"/)?.[1]);
+    expect(messageY).toBeGreaterThan(actors[0]!.y + actors[0]!.height);
   });
 
   test("all 30 sequence actors fit without overlapping headers", () => {

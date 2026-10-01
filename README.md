@@ -46,8 +46,7 @@ Click through a screen preview without calling the agent. The model supplies a s
 
 ### System diagrams
 
-Ask for a diagram to review architecture or a flow. Grill renders the agent's structured spec into SVG locally. A prototype is optional when the topic is a screen.
-
+Ask for a diagram to review architecture or a flow. Grill renders the agent's structured spec into SVG locally. Drag the canvas and use +, −, Fit, or Reset to inspect wide diagrams. A prototype is optional when the topic is a screen.
 ![Diagram connecting the browser, Grill server, session store, and OMP agent](docs/diagram.png)
 
 ### Interview notes
@@ -107,9 +106,13 @@ Grill keeps model calls for interview reasoning and delegates routine work to co
 
 Questions, replies, option analysis, and visual generation or regeneration still use model tokens. Total usage also depends on your surrounding OMP session context and model.
 
-## Using an interview
+Startup instructs the agent to publish once to the supplied interview ID, omit `handled` until a submission exists, and end without a chat recap. Submission acknowledgements must use the exact positive batch sequence. Collapsed publish calls show readable action summaries; expand them to inspect the full payload. The duplicate startup instruction is hidden from the terminal but still reaches the model. Display-only changes do not reduce tokens; avoiding failed publishes, recovery reads, and regenerated questions does. Model adherence and actual savings vary by provider.
 
-**Explore tradeoffs** asks the agent to compare options. **Defer** sets a question aside and lets you record when to revisit it. **Reopen** returns a recorded question to the discussion. These actions and visual requests start an agent turn immediately, without waiting for Send.
+The terminal's compact Grill indicator shows the bounded topic, progress, and state. Press `Ctrl+Alt+G` to expand it for the full topic, error, and private URL.
+
+**Explore tradeoffs** asks the configured discussion model to compare options. **Defer** sets a question aside and lets you record when to revisit it. **Reopen** returns a recorded question to the discussion. These actions and visual requests start the required specialist models immediately, without waiting for Send.
+
+Configure separate discussion, diagram, and prototype models with `/grill config discussionModel provider/model` (and the same key pattern for `diagramModel` and `prototypeModel`). Specialists only return their requested replies, analysis, or visual spec; the selected interview model still acknowledges the batch and decides any next questions. Specialist results persist, so `/grill resume` retries only missing work.
 
 The browser tab title counts open questions while it is your turn. On supported secure origins, such as localhost, you can allow desktop notifications for replies while the tab is hidden.
 
@@ -209,6 +212,7 @@ Use `/grill config` to see current values. For example:
 ```text
 /grill config host 127.0.0.1
 /grill config allowAgentStart true
+/grill config discussionModel anthropic/claude-sonnet-4-5
 ```
 
 | Setting | Default | Meaning |
@@ -216,6 +220,9 @@ Use `/grill config` to see current values. For example:
 | `host` | `0.0.0.0` | Listen on all IPv4 interfaces. Set `127.0.0.1` for local access only. |
 | `port` | `0` | Pick a free port. A fixed port applies to the first interview; later interviews use free ports. |
 | `allowAgentStart` | `false` | Let the agent start interviews from natural-language requests. |
+| `discussionModel` | `main` | Optional discussion/exploration specialist, as `provider/model-id`. |
+| `diagramModel` | `main` | Optional diagram specialist, as `provider/model-id`. |
+| `prototypeModel` | `main` | Optional prototype specialist, as `provider/model-id`. |
 
 By default, start or resume an interview with `/grill` before the agent can use Grill tools. Pausing or finishing the last open interview hides them again, keeping their schemas out of model context when Grill is idle. Set `allowAgentStart` to `true` to keep them available. This change takes effect immediately.
 

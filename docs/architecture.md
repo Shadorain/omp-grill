@@ -8,11 +8,16 @@ browser page (`web/`), and a terminal inspector (`src/tui.ts`).
 
 ```
 agent ──grill_publish──▶ store ──poll──▶ browser page
-agent ◀──submission───── server ◀──POST── page drafts (revision CAS)
+server ◀──POST── page drafts (revision CAS)
+       │                 │
+       └─pending batch──▶ configured discussion/diagram/prototype specialists
+                         └─remaining actions▶ owning interviewer
 ```
 
 The agent publishes questions; the page renders state. Draft edits autosave with
 a revision check; submissions batch every action and wake the owning session.
+Optional specialist models consume their matching actions first; the owning
+interviewer still decides and acknowledges the batch.
 
 ## Invariants
 
@@ -25,6 +30,10 @@ Keep these true when touching shared code; each has a test.
 - **Submissions are durable before delivery.** `pending` is persisted, delivered
   on resume, acknowledged only by `handled` in a later publish. Batches are
   tracked per interview and sequence so concurrent grills can't ack each other.
+- **Specialists are narrow writers.** Configured discussion/diagram/prototype
+  models may only return the publish fields for actions in their batch.
+  Completion is persisted on `pending.completed`; only the owning interviewer
+  can publish `handled`, follow-up questions, or context.
 - **Ownership follows the session.** Paused/errored interviews can be adopted by
   another session via `resumeStore`; live ones can't be stolen.
 - **Workspace identity is the repository.** `GrillState.workspace` is the git

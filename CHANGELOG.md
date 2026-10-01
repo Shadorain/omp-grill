@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- Replace the full-width status widget with a compact colored indicator: topic, progress, and state, with an expandable full topic/status/URL. The indicator disappears after finish.
+- Add optional `discussionModel`, `diagramModel`, and `prototypeModel` settings. Those requests run through configured model selectors with narrowed structured tools while the interviewer's model still owns follow-up questions and batch acknowledgement. Persisted specialist completion skips finished work on resume.
+- Show completed specialist work to the interviewer as readable action lines instead of raw JSON; it is omitted while a specialist is still running. Keep stale visual markers outside the main payload.
+- Size diagram titles, nodes, edges, and detail text from rendered content, reserve edge-label lanes, and fit long first-row/sequence content instead of overlapping or shrinking it. Add drag panning plus zoom, fit, and reset controls.
+- Shorten browser interview titles to a bounded word-aware header, and reuse the same shortened topic in the terminal widget. Click the browser title to toggle the full topic; hover still exposes it.
+- Print the initial private interview URL as soon as its questions publish instead of waiting for the startup turn to finish.
+- Restore missing draft/state helpers (`clone`, `safeText`, `storagePrefix`, `optionLetter`, `uid`) so a fresh browser interview initializes, autosaves drafts, reloads them, submits request-idempotent batches, and requests visuals.
+
+- Clarify startup versus submission acknowledgements in Grill's tool schema; reject zero, negative, and fractional batch sequences. Hide the duplicate startup instruction, summarize collapsed publish calls, omit unused acknowledgement counters from startup results, and request no chat recap after publishing.
 
 - Restore prototype blob URL state so switching to the prototype view, generation, and downloads work after the tab-title update.
 - Add `allowAgentStart` (default `false`). Grill tools stay inactive until a user command opens or resumes an interview, and are hidden again when the last open interview is paused or finished. Set it to `true` to allow agent-started interviews.

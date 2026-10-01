@@ -24,6 +24,14 @@ parse `settings.json` ad hoc. Validation errors already name the file and field.
 - `host`/`port` are read per `startServer` call, so changes apply on the next
   serve (pause + resume restarts a live one).
 
+## Specialist routing
+
+`discussionModel`, `diagramModel`, and `prototypeModel` are optional settings.
+When configured, `src/models.ts` runs that selector with a strict publish
+subset, then the main interviewer receives the remaining actions. Completed
+specialists persist on `pending.completed`, so resume skips them; the main
+model must still acknowledge the batch before `pending` clears.
+
 ## Notifying the user
 
 - `ctx.ui.notify(text, "info"|"error")` — transient results (URLs, selections,
