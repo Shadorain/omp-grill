@@ -94,6 +94,8 @@ function isQuestionInput(value: unknown): value is QuestionInput {
     return false;
   if (value.durable !== undefined && typeof value.durable !== "boolean")
     return false;
+  if (value.deferUntil !== undefined && typeof value.deferUntil !== "string")
+    return false;
   if (
     value.explore !== undefined &&
     (!Array.isArray(value.explore) ||
@@ -157,11 +159,9 @@ function isAction(action: unknown): action is Action {
       (action.option !== undefined || action.text !== undefined)
     );
   if (action.type === "thread") return typeof action.text === "string";
-  return (
-    action.type === "explore" ||
-    action.type === "defer" ||
-    action.type === "reopen"
-  );
+  if (action.type === "defer")
+    return action.until === undefined || typeof action.until === "string";
+  return action.type === "explore" || action.type === "reopen";
 }
 function parseActions(value: unknown): Action[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_ACTIONS)
@@ -195,6 +195,9 @@ function parseActions(value: unknown): Action[] {
     } else if (raw.type === "thread") {
       validText(raw.text, "thread text");
       actions.push({ type: "thread", q: raw.q, text: raw.text });
+    } else if (raw.type === "defer") {
+      if (raw.until !== undefined) validText(raw.until, "defer condition", 500);
+      actions.push({ type: "defer", q: raw.q, ...(raw.until === undefined ? {} : { until: raw.until }) });
     } else actions.push({ type: raw.type, q: raw.q });
   }
   return actions;
@@ -410,6 +413,7 @@ function report(state: GrillState): string {
         if (rejected.length) lines.push(`Rejected options: ${rejected.map((option) => option.label).join("; ")}`);
       }
     } else if (q.status === "deferred") lines.push("Decision: Deferred");
+    if (q.deferUntil) lines.push(`Revisit when: ${q.deferUntil}`);
     if (q.dependsOn?.length) lines.push(`Depends on: ${q.dependsOn.join(", ")}`);
     for (const exploration of q.explore ?? []) {
       const label = q.options.find((option) => option.id === exploration.option)?.label ?? exploration.option;
@@ -418,6 +422,13 @@ function report(state: GrillState): string {
       if (exploration.cons.length) lines.push(`Cons: ${exploration.cons.join("; ")}`);
     }
     for (const item of q.thread) lines.push(`- ${item.role === "user" ? "User" : "Agent"}: ${item.text}`);
+    lines.push("");
+  }
+  const postponed = state.questions.filter((q) => q.status === "deferred");
+  if (postponed.length) {
+    lines.push("## Deferred", "");
+    for (const q of postponed)
+      lines.push(`- ${q.title}${q.deferUntil ? ` — revisit when ${q.deferUntil}` : ""}`);
     lines.push("");
   }
   if (state.context.facts.length) {
@@ -552,6 +563,7 @@ export function compactState(state: GrillState): string {
           recommendation: q.recommendation,
           dependsOn: q.dependsOn,
           durable: q.durable,
+          deferUntil: q.deferUntil,
         },
   );
   return JSON.stringify({
@@ -882,6 +894,8 @@ function buildStore(dir: string, state: GrillState): Store {
           if (q.answer) q.history = [...(q.history ?? []), { at: new Date().toISOString(), reason: action.type, answer: clone(q.answer) }];
           q.status = action.type === "defer" ? "deferred" : "open";
           delete q.answer;
+          delete q.deferUntil;
+          if (action.type === "defer" && action.until) q.deferUntil = action.until;
         }
       }
       const decisionsChanged = actions.some((action) => action.type === "answer" || action.type === "reopen" || action.type === "defer");

@@ -27,7 +27,7 @@ function grillHome() {
 const ENTRY = "omp-grill.session";
 const instruction = `The extension owns the interview UI, durable state, event delivery, prototype interactions and reports. Never generate UI files, session JSON, polling scripts, HTML, CSS or JavaScript. Publish compact structured data, then end your turn; explicit browser sends wake this session.
 
-Publish 1-3 independent frontier questions through grill_publish. Include topic only when starting a user-requested interview. Each question has a stable id, short consequential title/body, 2-4 options {id,label}, and recommendation {option,reason} naming the real tradeoff. Free-text-only questions use empty options and omit the recommended option. dependsOn names answered prerequisites. Mark durable only when hard to reverse, surprising without context, and a real tradeoff. Record verified vocabulary, facts and risks in context {terms,facts,risks,intent}; never claim facts you did not verify.
+Publish 1-3 independent frontier questions through grill_publish. Include topic only when starting a user-requested interview. Each question has a stable id, short consequential title/body, 2-4 options {id,label}, and recommendation {option,reason} naming the real tradeoff. Free-text-only questions use empty options and omit the recommended option. dependsOn names answered prerequisites. Mark durable only when hard to reverse, surprising without context, and a real tradeoff. Record verified vocabulary, facts and risks in context {terms,facts,risks,intent}; never claim facts you did not verify. A defer action may carry until — the concrete condition that makes the question worth revisiting — shown in the report's Deferred section.
 
 Challenge assumptions, outcomes, failure cases and tradeoffs. Research code/docs instead of asking the user for facts. Do not seek confirmation for routine implementation choices or reopen settled decisions without a conflict. Do not implement the topic during the interview.
 
@@ -283,6 +283,23 @@ export default function grillExtension(pi: ExtensionAPI) {
       },
     });
   }
+  function writeDraft(runtime: Runtime, questionId: string, kind: "answer" | "thread", text: string) {
+    const state = runtime.store.state;
+    const question = state.questions.find((item) => item.id === questionId);
+    if (!question || state.status === "finished") return;
+    if (kind === "thread") {
+      runtime.store.saveDrafts({ revision: state.drafts.revision, threads: { [questionId]: text || null } });
+      return;
+    }
+    const option = state.drafts.answers[questionId]?.option ?? question.answer?.option;
+    const same = (option || "") === (question.answer?.option || "") && text === (question.answer?.text || "");
+    runtime.store.saveDrafts({
+      revision: state.drafts.revision,
+      answers: {
+        [questionId]: same || (!option && !text) ? null : { ...(option ? { option } : {}), ...(text ? { text } : {}) },
+      },
+    });
+  }
   function draftActions(runtime: Runtime): Action[] {
     const actions: Action[] = [];
     for (const question of runtime.store.state.questions) {
@@ -378,6 +395,11 @@ export default function grillExtension(pi: ExtensionAPI) {
             if (current) stageDraft(current, questionId, optionId);
             tui.requestRender();
           },
+          write: (questionId, kind, text) => {
+            const current = runtimeOf(currentId);
+            if (current) writeDraft(current, questionId, kind, text);
+            tui.requestRender();
+          },
           send: () => {
             const current = runtimeOf(currentId);
             if (current) sendDrafts(current);
@@ -396,10 +418,10 @@ export default function grillExtension(pi: ExtensionAPI) {
             wake(current, current.store.submit([{ type: "explore", q: questionId }]));
             tui.requestRender();
           },
-          defer: (questionId) => {
+          defer: (questionId, until) => {
             const current = runtimeOf(currentId);
             if (!current) return;
-            wake(current, current.store.submit([{ type: "defer", q: questionId }]));
+            wake(current, current.store.submit([{ type: "defer", q: questionId, ...(until ? { until } : {}) }]));
             tui.requestRender();
           },
         },

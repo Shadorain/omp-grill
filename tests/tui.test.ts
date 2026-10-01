@@ -56,6 +56,11 @@ describe("grill session TUI", () => {
           stage(q, option) {
             store.saveDrafts({ revision: store.state.drafts.revision, answers: { [q]: { option } } });
           },
+          write(q, kind, text) {
+            store.saveDrafts(kind === "thread"
+              ? { revision: store.state.drafts.revision, threads: { [q]: text || null } }
+              : { revision: store.state.drafts.revision, answers: { [q]: text ? { text } : null } });
+          },
           send() {
             store.submit([{ type: "answer", q: question.id, ...store.state.drafts.answers[question.id] }]);
           },
@@ -76,6 +81,66 @@ describe("grill session TUI", () => {
       inspector.handleInput("e");
       expect(store.state.pending?.actions).toEqual([{ type: "explore", q: question.id }]);
       expect(store.state.seq).toBe(2);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("writes answers and messages for a question with no options", () => {
+    const home = mkdtempSync(join(tmpdir(), "omp-grill-inspector-"));
+    try {
+      const store = createStore({ home, owner: "me", project: home, topic: "Invariants" });
+      store.publish({ questions: [{
+        id: "inv", title: "Name the invariant", options: [],
+        recommendation: { reason: "Open ended" },
+      }] });
+      const inspector = new GrillInspector(
+        () => store.state,
+        {
+          close() {}, stage() {}, send() {}, finish() {}, explore() {}, defer() {},
+          write(q, kind, text) {
+            store.saveDrafts(kind === "thread"
+              ? { revision: store.state.drafts.revision, threads: { [q]: text || null } }
+              : { revision: store.state.drafts.revision, answers: { [q]: text ? { text } : null } });
+          },
+        },
+        () => 40, theme, { matches: () => false },
+      );
+
+      for (const key of [..."i", ..."Store is the only writer.", "\r"]) inspector.handleInput(key);
+      expect(store.state.drafts.answers.inv).toEqual({ text: "Store is the only writer." });
+
+      // Letters reach the buffer instead of staging a nonexistent option.
+      for (const key of [..."m", ..."Why not the server?", "\r"]) inspector.handleInput(key);
+      expect(store.state.drafts.threads.inv).toBe("Why not the server?");
+
+      // Backspace edits, escape discards.
+      for (const key of [..."i", ..."ab", "\u007f", "\u001b"]) inspector.handleInput(key);
+      expect(store.state.drafts.answers.inv).toEqual({ text: "Store is the only writer." });
+
+      expect(inspector.render(80).some((line) => line.includes("Store is the only writer."))).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("defer asks for a revisit condition and records it", () => {
+    const home = mkdtempSync(join(tmpdir(), "omp-grill-inspector-"));
+    try {
+      const store = createStore({ home, owner: "me", project: home, topic: "Cache" });
+      store.publish({ questions: [{ id: "ttl", title: "Cache TTL", options: [], recommendation: { reason: "r" } }] });
+      const inspector = new GrillInspector(
+        () => store.state,
+        {
+          close() {}, stage() {}, write() {}, send() {}, finish() {}, explore() {},
+          defer(q, until) { store.submit([{ type: "defer", q, ...(until ? { until } : {}) }]); },
+        },
+        () => 40, theme, { matches: () => false },
+      );
+      for (const key of [..."x", ..."after load test", "\r"]) inspector.handleInput(key);
+      expect(store.state.questions[0]?.status).toBe("deferred");
+      expect(store.state.questions[0]?.deferUntil).toBe("after load test");
+      expect(inspector.render(80).some((line) => line.includes("Revisit when") && line.includes("after load test"))).toBe(true);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

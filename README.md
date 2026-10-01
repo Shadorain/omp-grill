@@ -63,7 +63,7 @@ Prefer the terminal? Run `/grill tui` to open the selected interview inside your
 
 ![Session terminal](docs/tui.png)
 
-Use `j`/`k` to move between questions and `a`-`d` to stage an option. Press `enter` to send, `e` to explore, `x` to defer, or `f` twice to finish. Use `tab` to view the discussion and `esc` or `q` to close the inspector. Closing the inspector leaves the interview open.
+Use `j`/`k` to move between questions and `a`-`d` to stage an option. Press `i` to write an answer (the only way to answer a question with no options), `m` to write a discussion message, and `x` to defer with an optional "revisit when" condition; `enter` saves, `esc` discards. Press `enter` to send, `e` to explore, or `f` twice to finish. Use `tab` to view the discussion and `esc` or `q` to close the inspector. Closing the inspector leaves the interview open.
 
 Starting with `/grill tui <topic>` also wakes the agent to publish the first questions. While a batch is pending, drafts stay editable, but Send, Explore, Defer, and Finish wait for acknowledgement.
 

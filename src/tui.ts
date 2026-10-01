@@ -14,13 +14,25 @@ export interface GrillKeys {
 export interface GrillTuiActions {
   close(): void;
   stage(questionId: string, optionId: string): void;
+  /** Save answer text or a discussion message as a draft, without sending. */
+  write(questionId: string, kind: "answer" | "thread", text: string): void;
   send(): void;
   finish(): void;
   explore(questionId: string): void;
-  defer(questionId: string): void;
+  defer(questionId: string, until?: string): void;
 }
 
 const LETTERS = "abcdefghijklmnopqrstuvwxyz";
+/** Letters bound to commands, so they never stage an option. */
+const COMMAND_KEYS: Record<string, true> = { e: true, f: true, i: true, j: true, k: true, m: true, q: true, x: true };
+/** Matches the store's text cap, so a draft cannot be rejected on save. */
+const MAX_DRAFT_TEXT = 20_000;
+/** Prompt shown while a text field is active. */
+const EDIT_PROMPT: Record<"answer" | "thread" | "defer", string> = {
+  answer: "typing answer",
+  thread: "typing message",
+  defer: "revisit when",
+};
 
 function clip(value: string, width: number): string {
   return truncateToWidth(replaceTabs(value), Math.max(1, width));
@@ -82,6 +94,8 @@ export class GrillInspector implements Component {
   private view: "questions" | "discussion" = "questions";
   private confirmFinish = false;
   private note = "";
+  /** Active text field, or undefined when keys act as commands. */
+  private editing?: { kind: "answer" | "thread" | "defer"; buffer: string };
 
   constructor(
     private readonly getState: () => GrillState | undefined,
@@ -108,7 +122,13 @@ export class GrillInspector implements Component {
       `${rail} ${[paint(theme, "accent", state.topic), paint(theme, "text", `${answered}/${questions.length}`), paint(theme, "dim", state.status)].join(dot(theme))}`,
       width,
     );
-    const keys = paint(theme, "dim", "j/k  a-d stage  enter send  e explore  x defer  f finish  tab thread  esc");
+    const keys = paint(
+      theme,
+      "dim",
+      this.editing
+        ? `${EDIT_PROMPT[this.editing.kind]}  enter save  esc cancel`
+        : "j/k  a-d stage  i write  m message  enter send  e explore  x defer  f finish  tab thread  esc",
+    );
     const lines = [header, clip(`  ${keys}`, width)];
     if (this.note) lines.push(clip(`  ${paint(theme, "warning", this.note)}`, width));
     if (this.view === "discussion" && question) {
@@ -118,6 +138,8 @@ export class GrillInspector implements Component {
       for (const entry of thread.slice(-8)) {
         lines.push(clip(`  ${paint(theme, entry.role === "user" ? "text" : "dim", entry.role === "user" ? "You" : "Agent")}  ${entry.text}`, width));
       }
+      if (this.editing?.kind === "thread")
+        lines.push(clip(`  ${paint(theme, "accent", ">")} ${this.editing.buffer}${paint(theme, "accent", "▌")}`, width));
       return lines.slice(0, Math.max(4, this.getRows() - 1));
     }
     const budget = Math.max(4, this.getRows() - 1);
@@ -147,6 +169,17 @@ export class GrillInspector implements Component {
       const mark = chosen ? paint(theme, "success", " ✓") : "";
       lines.push(clip(`  ${paint(theme, chosen ? "accent" : "text", letter.toUpperCase())}  ${option.label}${pill}${mark}`, width));
     });
+    if (this.editing && this.editing.kind !== "thread") {
+      const label = this.editing.kind === "defer" ? "Revisit when" : ">";
+      lines.push(clip(`  ${paint(theme, "accent", label)} ${this.editing.buffer}${paint(theme, "accent", "▌")}`, width));
+    } else {
+      const written = (state.drafts.answers[question.id]?.text ?? question.answer?.text ?? "").trim();
+      if (written) lines.push(clip(`  ${paint(theme, "dim", "Written:")} ${written}`, width));
+      else if (!question.options.length)
+        lines.push(clip(`  ${paint(theme, "muted", "Press i to write an answer")}`, width));
+      if (question.deferUntil)
+        lines.push(clip(`  ${paint(theme, "warning", "Revisit when")} ${question.deferUntil}`, width));
+    }
     if (state.note && questions.every((item) => item.status !== "open")) {
       lines.push(clip(`  ${paint(theme, "success", state.note)}`, width));
     }
@@ -156,6 +189,10 @@ export class GrillInspector implements Component {
   invalidate(): void {}
 
   handleInput(data: string): void {
+    if (this.editing) {
+      this.editText(data);
+      return;
+    }
     if (this.keys.matches(data, "tui.select.cancel") || data === "q" || data === "\u001b") {
       this.actions.close();
       return;
@@ -180,12 +217,23 @@ export class GrillInspector implements Component {
     const state = this.getState();
     if (!question || !state || state.status === "finished") return;
     try {
-      const reserved = new Set(["e", "x", "f", "j", "k", "q"]);
       const letter = LETTERS.indexOf(data.toLowerCase());
-      if (!reserved.has(data.toLowerCase()) && letter >= 0 && letter < question.options.length && data.length === 1) {
+      if (!COMMAND_KEYS[data.toLowerCase()] && letter >= 0 && letter < question.options.length && data.length === 1) {
         const option = question.options[letter];
         if (option) this.actions.stage(question.id, option.id);
         this.confirmFinish = false;
+        return;
+      }
+      // Drafts stay editable while the agent works, matching the browser.
+      if (data === "i" || data === "m") {
+        const kind = data === "i" ? "answer" : "thread";
+        const existing = kind === "answer"
+          ? state.drafts.answers[question.id]?.text ?? question.answer?.text ?? ""
+          : state.drafts.threads[question.id] ?? "";
+        this.editing = { kind, buffer: existing };
+        this.view = kind === "thread" ? "discussion" : "questions";
+        this.confirmFinish = false;
+        this.note = "";
         return;
       }
       if (state.pending || state.status === "working") {
@@ -204,8 +252,9 @@ export class GrillInspector implements Component {
         return;
       }
       if (data === "x") {
-        this.actions.defer(question.id);
-        this.note = "Deferred.";
+        this.editing = { kind: "defer", buffer: question.deferUntil ?? "" };
+        this.confirmFinish = false;
+        this.note = "";
         return;
       }
       if (data === "f") {
@@ -220,6 +269,44 @@ export class GrillInspector implements Component {
       this.confirmFinish = false;
       this.note = error instanceof Error ? error.message : String(error);
     }
+  }
+
+  /** Line editor for the active answer or message draft. */
+  private editText(data: string): void {
+    const editing = this.editing;
+    if (!editing) return;
+    if (data === "\u001b") {
+      this.editing = undefined;
+      this.note = "Discarded.";
+      return;
+    }
+    if (data === "\r" || data === "\n") {
+      const question = this.questions()[this.selected];
+      this.editing = undefined;
+      if (!question) return;
+      const text = editing.buffer.trim();
+      try {
+        if (editing.kind === "defer") {
+          this.actions.defer(question.id, text || undefined);
+          this.note = text ? `Deferred until ${text}.` : "Deferred.";
+          return;
+        }
+        this.actions.write(question.id, editing.kind, text);
+        this.note = text
+          ? `Staged ${editing.kind === "answer" ? "answer" : "message"}. Press enter to send.`
+          : "Cleared.";
+      } catch (error) {
+        this.note = error instanceof Error ? error.message : String(error);
+      }
+      return;
+    }
+    if (data === "\u007f" || data === "\b") {
+      editing.buffer = [...editing.buffer].slice(0, -1).join("");
+      return;
+    }
+    // Drop control sequences; arrow keys and the like carry no text.
+    if (data.startsWith("\u001b") || /[\u0000-\u001f]/.test(data)) return;
+    if (editing.buffer.length + data.length <= MAX_DRAFT_TEXT) editing.buffer += data;
   }
 }
 

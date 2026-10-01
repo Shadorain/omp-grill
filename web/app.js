@@ -435,7 +435,11 @@
     renderedQuestion = q.id;
     const index = state.questions.indexOf(q);
     $("q-id").textContent = `Q${index + 1}`;
-    $("q-state").textContent = q.status === "answered" ? " · answered" : q.status === "deferred" ? " · deferred" : "";
+    $("q-state").textContent = q.status === "answered"
+      ? " · answered"
+      : q.status === "deferred"
+        ? ` · deferred${q.deferUntil ? ` until ${q.deferUntil}` : ""}`
+        : "";
     rebuild($("q-deps"), [q.id, q.dependsOn || []], () => {
       for (const dep of q.dependsOn || []) {
         const target = state.questions.find((item) => item.id === dep);
@@ -1224,7 +1228,13 @@
   });
   $("send-btn").addEventListener("click", () => postActions(null, retryRequest ? { retry: true } : { drafts: true }));
   $("explore-action").addEventListener("click", () => { const q = qSelected(); if (q) sendNative([{ type: "explore", q: q.id }]); });
-  $("defer-action").addEventListener("click", () => { const q = qSelected(); if (q) sendNative([{ type: "defer", q: q.id }]); });
+  $("defer-action").addEventListener("click", () => {
+    const q = qSelected();
+    if (!q) return;
+    // A deferral is only actionable later if we record what unblocks it.
+    const until = (prompt("Revisit this when… (optional)") || "").trim();
+    sendNative([{ type: "defer", q: q.id, ...(until ? { until } : {}) }]);
+  });
   $("reopen-action").addEventListener("click", () => { const q = qSelected(); if (q) sendNative([{ type: "reopen", q: q.id }]); });
   $("finish-btn").addEventListener("click", () => {
     const questions = state?.questions || [];

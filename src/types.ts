@@ -78,6 +78,8 @@ export interface Question {
   dependsOn?: string[];
   durable?: boolean;
   status: QuestionStatus;
+  /** What must change before a deferred question is worth revisiting. */
+  deferUntil?: string;
   answer?: { option?: string; text?: string };
   thread: { role: "user" | "agent"; text: string }[];
   explore?: { option: string; pros: string[]; cons: string[] }[];
@@ -86,13 +88,14 @@ export interface Question {
 }
 export type QuestionInput = Omit<
   Question,
-  "status" | "thread" | "history" | "recommendationUpdated"
+  "status" | "deferUntil" | "thread" | "history" | "recommendationUpdated"
 >;
 export type Action =
   | { type: "answer"; q: string; option?: string; text?: string }
   | { type: "thread"; q: string; text: string }
   | { type: "explore"; q: string }
-  | { type: "defer" | "reopen"; q: string }
+  | { type: "defer"; q: string; until?: string }
+  | { type: "reopen"; q: string }
   | { type: "visualize"; kind?: "diagram" | "prototype" }
   | { type: "visual-feedback"; kind?: "diagram" | "prototype"; text: string }
   | { type: "finish" };
