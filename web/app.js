@@ -29,7 +29,7 @@
   let restoredServerIds = new Set();
   let barNote = "";
   let diagramUrl = "";
-  let prototypeUrl = "";
+  let topicTitle = "Decision interview";
   let visualBusy = false;
   let expectingVisual = false;
   let intentDraft = null;
@@ -92,10 +92,25 @@
   function statusLabel(value) {
     return ({ waiting: "Waiting for you", ready: "Ready to finish", working: "Agent thinking…", paused: "Paused", error: "Error", finished: "Finished", loading: "Connecting" })[value] || "Waiting for you";
   }
+  function openCount() {
+    return (state?.questions || []).filter((q) => q.status === "open").length;
+  }
+  function updateTitle() {
+    const count = openCount();
+    const badge = state?.status === "waiting" && count > 0 ? `(${count}) ` : "";
+    document.title = `${badge}${topicTitle} — Grill`;
+  }
+  function notifyTurn(count) {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const body = count > 0 ? `${count} question${count === 1 ? "" : "s"} waiting for an answer.` : "The interview is settled.";
+    const ping = new Notification("Grill — your turn", { body, tag: "grill-turn", icon: "/favicon.svg" });
+    ping.onclick = () => { window.focus(); ping.close(); };
+  }
   function setStatus() {
     const value = state?.pending && state.status !== "error" ? "working" : interviewSettled() && state.status === "waiting" ? "ready" : state?.status || "loading";
     $("status").dataset.status = value;
     $("status-text").textContent = statusLabel(value);
+    updateTitle();
   }
   function persistLocal() {
     if (!state?.id) return;
@@ -1007,7 +1022,8 @@
   function render() {
     if (!state) return;
     const focusKey = document.activeElement?.dataset?.focusKey || "";
-    $("topic-title").textContent = safeText(state.topic) || "Decision interview";
+    topicTitle = safeText(state.topic) || "Decision interview";
+    $("topic-title").textContent = topicTitle;
     $("topic-note").textContent = safeText(state.note);
     $("topic-note").hidden = !safeText(state.note).trim();
     renderSegment();
@@ -1046,6 +1062,7 @@
       // An unconfirmed send that the server did commit must not stay retryable.
       if (retryRequest && next.lastSubmission?.requestId === retryRequest.body.requestId) retryRequest = null;
       const pendingFinished = !!state?.pending && !next.pending;
+      const wasBusy = !!state?.pending || state?.status === "working";
       const oldArtifactSignature = artifactSignature;
       if (next.id !== state?.id) {
         state = next;
@@ -1083,6 +1100,8 @@
         }
         state = next;
       }
+      // The agent released the turn while this tab was in the background.
+      if (wasBusy && document.hidden && state.status === "waiting" && !state.pending) notifyTurn(openCount());
       artifactSignature = `${state.prototype?.version || 0}:${state.diagram?.version || 0}`;
       if (artifactSignature !== oldArtifactSignature || !state.pending) expectingVisual = false;
       if (changed) render();
@@ -1334,6 +1353,9 @@
   window.addEventListener("online", () => { syncBanner(); updateSync(); });
   window.addEventListener("offline", () => { showError("The browser is offline.", true); updateSync(); });
   window.addEventListener("beforeunload", (event) => { if (dirty || saving || sending) { event.preventDefault(); event.returnValue = ""; } });
+  document.addEventListener("click", () => {
+    if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission();
+  }, { once: true });
   refresh();
   setInterval(refresh, 1800);
 })();

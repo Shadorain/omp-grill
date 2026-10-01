@@ -22,7 +22,7 @@ Start an interview with `/grill <topic>` or `/grill tui <topic>`. To let the age
 3. Click **Send N to agent**, or press Cmd/Ctrl+Enter, to send your drafts together.
 4. Click **Finish** to save the interview as `report.md`.
 
-Explore, Defer, Reopen, and visual requests reach the agent immediately rather than waiting for Send.
+Explore, Defer, Reopen, and visual requests reach the agent immediately rather than waiting for Send. Defer asks for an optional "revisit when" condition shown in the report's Deferred section. The tab title shows a `(N)` badge while the turn is yours, and the page can ask to send a desktop notification when the agent releases the turn in a hidden tab.
 
 You can keep several interviews open. Use `/grill use <id>` to select the one that commands and agent replies should target.
 
