@@ -356,7 +356,7 @@ a { color: var(--blue); }
 .tag-recorded { color: var(--green); border-color: rgba(135, 228, 192, 0.45); }
 .why-line { color: var(--muted); margin: 10px 0 0; font-size: 14px; }
 .qcard .hint { margin-top: 8px; }
-textarea, input {
+textarea, input, select {
   width: 100%;
   padding: 9px 12px;
   border: 1px solid var(--line-soft);
@@ -366,8 +366,8 @@ textarea, input {
   font-size: 14px;
   resize: vertical;
 }
-textarea:focus, input:focus { outline: none; border-color: var(--purple); }
-textarea:disabled, input:disabled { opacity: 0.55; }
+textarea:focus, input:focus, select:focus { outline: none; border-color: var(--purple); }
+textarea:disabled, input:disabled, select:disabled { opacity: 0.55; }
 #answer-text { margin-top: 14px; }
 .qfoot {
   display: flex;

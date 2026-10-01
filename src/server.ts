@@ -9,6 +9,7 @@ import { dirname } from "node:path";
 import { hostname, networkInterfaces } from "node:os";
 import { isIP } from "node:net";
 import type { GrillServer, Store, Submission } from "./types";
+import { type ExportKind, EXPORT_KINDS } from "./exports";
 import { readServerSettings } from "./settings";
 import { renderPrototype } from "./prototype";
 import { renderDiagram } from "./diagram";
@@ -292,15 +293,13 @@ export async function startServer(input: {
           respond(res, 400, JSON.stringify({ error: "Expected export path" }));
           return;
         }
-        const overwrite = record.overwrite === true;
-        let path: string;
-        if (record.kind === undefined || record.kind === "report") path = input.store.exportReport(record.path, overwrite);
-        else if (record.kind === "prototype" || record.kind === "diagram") path = input.store.exportVisual(record.kind, record.path, overwrite);
-        else {
+        const kind = record.kind === undefined ? "report" : record.kind;
+        if (typeof kind !== "string" || !(EXPORT_KINDS as readonly string[]).includes(kind)) {
           respond(res, 400, JSON.stringify({ error: "Invalid export kind" }));
           return;
         }
-        respond(res, 200, JSON.stringify({ path }));
+        const paths = input.store.exportArtifact(kind as ExportKind, record.path, record.overwrite === true);
+        respond(res, 200, JSON.stringify({ path: paths[0], paths }));
         return;
       }
       respond(res, 404, JSON.stringify({ error: "Not found" }));

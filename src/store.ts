@@ -18,6 +18,7 @@ import type {
   Submission,
 } from "./types";
 import { renderDiagram } from "./diagram";
+import { type ExportFile, type ExportKind, renderAdrs, renderBeadsPlan } from "./exports";
 import { renderPrototype, validatePrototypeSpec } from "./prototype";
 import { workspaceRoot } from "./workspace";
 
@@ -629,6 +630,38 @@ function exportTarget(project: string, path: string, overwrite: boolean): string
   return target;
 }
 
+/** Files a kind produces, as project-relative paths plus contents. */
+function renderExport(state: GrillState, kind: ExportKind, path: string): ExportFile[] {
+  if (kind === "report") return [{ path, contents: report(state) }];
+  if (kind === "diagram") {
+    if (!state.diagram) fail("No diagram available");
+    return [{ path, contents: renderDiagram(state.diagram) }];
+  }
+  if (kind === "prototype") {
+    if (!state.prototype) fail("No prototype available");
+    return [{ path, contents: renderPrototype(state.prototype) }];
+  }
+  if (kind === "beads") return [{ path, contents: renderBeadsPlan(state) }];
+  const dir = path.replace(/\/+$/, "");
+  return renderAdrs(state, dir, usedAdrNumbers(resolve(state.project, dir)));
+}
+
+/** Numbers already taken by `NNNN-slug.md` records in an ADR directory. */
+function usedAdrNumbers(dir: string): number[] {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const numbers: number[] = [];
+  for (const entry of entries) {
+    const match = /^(\d{1,6})-.*\.md$/.exec(entry);
+    if (match?.[1]) numbers.push(Number(match[1]));
+  }
+  return numbers;
+}
+
 function buildStore(dir: string, state: GrillState): Store {
   const save = (next: GrillState) => {
     // Keep long sessions under MAX_STATE: retain only the most recent conversation and history.
@@ -718,30 +751,19 @@ function buildStore(dir: string, state: GrillState): Store {
       save(next);
     },
     previewReport(): string { return report(state); },
-    exportReport(path: string, overwrite = false): string {
+    exportArtifact(kind: ExportKind, path: string, overwrite = false): string[] {
       if (state.status !== "finished") fail("Export requires a finished interview");
-      const target = exportTarget(state.project, path, overwrite);
-      persistReport(target, report(state));
-      const next = clone(state);
-      next.exportedPath = target;
-      next.context.docPath = relative(resolve(state.project), target);
-      save(next);
-      return target;
-    },
-    exportVisual(kind: "diagram" | "prototype", path: string, overwrite = false): string {
-      if (state.status !== "finished") fail("Export requires a finished interview");
-      if (kind === "diagram" ? !state.diagram : !state.prototype) fail(`No ${kind} available`);
-      const target = exportTarget(state.project, path, overwrite);
-      let contents: string;
-      if (kind === "diagram") {
-        if (!state.diagram) fail("No diagram available");
-        contents = renderDiagram(state.diagram);
-      } else {
-        if (!state.prototype) fail("No prototype available");
-        contents = renderPrototype(state.prototype);
+      const files = renderExport(state, kind, path);
+      // Resolve every target before writing, so a rejected path writes nothing.
+      const targets = files.map((file) => exportTarget(state.project, file.path, overwrite));
+      for (const [index, file] of files.entries()) persistReport(targets[index]!, file.contents);
+      if (kind === "report") {
+        const next = clone(state);
+        next.exportedPath = targets[0];
+        next.context.docPath = relative(resolve(state.project), targets[0]!);
+        save(next);
       }
-      persistReport(target, contents);
-      return target;
+      return targets;
     },
     publish(patch: Publish): void {
       if (!isRecord(patch)) fail("Invalid publish patch");

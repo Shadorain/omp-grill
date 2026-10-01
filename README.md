@@ -41,12 +41,14 @@ You can keep several interviews open. Use `/grill use <id>` to select the one th
 | `/grill pause` | Pause the selected interview. |
 | `/grill resume` | Resume a paused or errored interview. |
 | `/grill history` | View a finished interview. |
-| `/grill sessions` | List saved interviews for this project. |
 | `/grill finish` | Finish the interview and save its report. |
+| `/grill export <kind> [path]` | Write `report`, `adr`, `beads`, `diagram`, or `prototype` into the project (kinds autocomplete). Needs a finished interview; add `--force` to overwrite. `adr` writes one numbered record per durable decision into `docs/adr`; `beads` writes a plan you apply with `bd create --graph <file>`. |
 | `/grill fork [id]` | Start a separate interview seeded with a finished interview's intent, glossary, facts, and risks. |
 | `/grill config` | Show settings; `/grill config <key> <value>` sets one. Keys and values autocomplete. |
 
 Run `/grill` to list open interviews and commands. Tab completion suggests commands, interview IDs, questions, and options.
+
+In the browser's Report drawer, choose an export format and press Export. The path is optional; ADRs use a directory, while the other formats use a file. Unavailable formats are disabled. ADRs include recorded decisions and considered options, without inferred consequences. Beads plans retain an explicit `https://linear.app/<workspace>/issue/<ID>` URL from the interview topic as the parent epic's `external_ref`; a bare ticket ID is not enough to infer the workspace.
 
 If an agent turn stops, the page shows its error and keeps the saved batch. Run `/grill resume` in the owning OMP session to retry it. Resuming an attached error keeps the same page URL; finished interviews are excluded from resume.
 

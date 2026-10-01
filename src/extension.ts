@@ -20,7 +20,7 @@ import {
   validateServerSettings,
   writeServerSettings,
 } from "./settings.ts";
-
+import { type ExportKind, EXPORT_DEFAULTS, EXPORT_KINDS } from "./exports.ts";
 function grillHome() {
   return process.env.OMP_GRILL_HOME || join(homedir(), ".omp", "grill");
 }
@@ -254,6 +254,7 @@ export default function grillExtension(pi: ExtensionAPI) {
 /grill history          open a finished grill's locked page alongside the others
 /grill sessions         list saved grills for this project
  /grill finish           finish the selected grill and write report.md
+ /grill export <kind>    write report, adr, beads, diagram or prototype into the project
  /grill fork [id]        start a new interview carrying a finished grill's context
  /grill config           show settings; config <key> <value> sets one
  /grill tui [topic|off]  open this interview in the session terminal`;
@@ -602,6 +603,23 @@ export default function grillExtension(pi: ExtensionAPI) {
         await syncTools();
         status();
         ctx.ui.notify(`Grill finished: ${report}`, "info");
+        return;
+      }
+      if (command === "export" || command.startsWith("export ")) {
+        const runtime = owned(ctx);
+        const rest = command === "export" ? "" : command.slice(7).trim();
+        const words = rest.split(/\s+/).filter(Boolean);
+        const force = words.includes("--force");
+        const [word = "", ...tail] = words.filter((item) => item !== "--force");
+        const kind = (word || "report") as ExportKind;
+        if (!(EXPORT_KINDS as readonly string[]).includes(kind))
+          throw new Error(`Unknown export kind. Use ${EXPORT_KINDS.join(", ")}.`);
+        if (runtime.store.state.status !== "finished")
+          throw new Error("Export needs a finished grill. Run /grill finish first.");
+        const target = tail.join(" ") || EXPORT_DEFAULTS[kind];
+        const written = runtime.store.exportArtifact(kind, target, force);
+        const hint = kind === "beads" ? `\nApply it with: bd create --graph ${written[0]}` : "";
+        ctx.ui.notify(`Exported ${kind}: ${written.join(", ")}${hint}`, "info");
         return;
       }
       if (command === "url") {

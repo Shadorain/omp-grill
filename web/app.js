@@ -973,9 +973,30 @@
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  async function exportArtifact(kind) {
-    const path = $("export-path").value.trim();
-    if (!path) { $("export-feedback").textContent = "Enter a project-relative path."; return; }
+  const exportDefaults = {
+    report: "docs/grill-report.md",
+    diagram: "docs/grill-diagram.svg",
+    prototype: "docs/grill-prototype.html",
+    adr: "docs/adr",
+    beads: "docs/grill-beads.json",
+  };
+  function updateExportDestination() {
+    const kind = $("export-kind").value;
+    $("export-path").value = "";
+    $("export-path").placeholder = exportDefaults[kind];
+    $("export-path-label").textContent = kind === "adr" ? "Directory path" : "File path";
+    $("export-feedback").textContent = "";
+  }
+  function exportFeedback(kind, result) {
+    const paths = result.paths ?? [result.path];
+    const message = `Exported ${kind} to ${paths.join(", ")}.`;
+    $("export-feedback").textContent = kind === "beads"
+      ? `${message} Import from the project with: bd create --graph ${JSON.stringify($("export-path").value.trim() || exportDefaults.beads)}`
+      : message;
+  }
+  async function exportArtifact() {
+    const kind = $("export-kind").value;
+    const path = $("export-path").value.trim() || exportDefaults[kind];
     const attempt = async (overwrite) => {
       const response = await api("/api/export", { method: "POST", body: JSON.stringify({ kind, path, overwrite }) });
       const result = await response.json().catch(() => ({}));
@@ -984,12 +1005,12 @@
     };
     try {
       const result = await attempt(false);
-      $("export-feedback").textContent = `Exported ${kind} to ${result.path}.`;
+      exportFeedback(kind, result);
     } catch (error) {
       if (/exists/i.test(error.message || "") && confirm(`${path} exists in the project. Overwrite it?`)) {
         try {
           const result = await attempt(true);
-          $("export-feedback").textContent = `Exported ${kind} to ${result.path}.`;
+          exportFeedback(kind, result);
           return;
         } catch (retryError) {
           error = retryError;
@@ -1003,8 +1024,13 @@
     const finished = state?.status === "finished";
     $("export-locked").hidden = finished;
     $("export-row").hidden = !finished;
-    $("export-proto").hidden = !finished || !state?.prototype;
-    $("export-diagram").hidden = !finished || !state?.diagram;
+    for (const option of $("export-kind").options) {
+      option.disabled = option.value === "prototype" ? !state?.prototype
+        : option.value === "diagram" ? !state?.diagram
+        : option.value === "adr" ? !state?.questions.some((q) => q.durable && q.status === "answered")
+        : option.value === "beads" ? !state?.questions.some((q) => q.status === "answered" || q.status === "deferred")
+        : false;
+    }
   }
   // ----- Drawers -----
   function openDrawer(which) {
@@ -1340,9 +1366,8 @@
   });
   $("load-report").addEventListener("click", loadReport);
   $("report-download").addEventListener("click", downloadReport);
-  $("export-report").addEventListener("click", () => exportArtifact("report"));
-  $("export-proto").addEventListener("click", () => exportArtifact("prototype"));
-  $("export-diagram").addEventListener("click", () => exportArtifact("diagram"));
+  $("export-kind").addEventListener("change", updateExportDestination);
+  $("export-submit").addEventListener("click", exportArtifact);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeDrawer();
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {

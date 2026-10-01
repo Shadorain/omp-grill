@@ -11,6 +11,10 @@
 - Redesign the browser page as three columns (question list, question, discussion) with a bottom send bar, modeled on upstream grill-with-ui: lettered options with the recommendation outlined, staged discussion messages, one `Send N to agent` button (⌘/Ctrl+Enter), click-to-change recorded answers, `after Qn` dependency links, and Notes/Report as header drawers. The review dialog, decision map, and four-tab layout are gone.
 - Notes: facts no longer require a source, risks no longer require a mitigation, and saved glossary terms, facts, and risks can be removed.
 - On the last question, Next becomes Send while anything is staged, and Finish once every question is recorded. Answered questions show a check and stay changeable; a different option stages a replacement rather than erasing the recorded answer. When the agent has no further questions, the status reads Ready to finish instead of leaving Next disabled.
+- Unify project writes behind `/grill export <kind>` (`report`, `adr`, `beads`, `diagram`, `prototype`); kinds autocomplete.
+- Add `adr` export: each answered durable decision becomes the next `docs/adr/NNNN-slug.md` (numbered after existing records), with considered options from Explore and no inferred consequences. Refuses to run when nothing is durable.
+- Add `beads` export: questions and `dependsOn` emit a `bd create --graph` JSON plan (epic plus tasks with blocked-by edges). Preserve an explicit Linear issue URL from the topic as the epic's external reference; omit ambiguous bare IDs.
+- Replace separate browser export buttons with a format selector, optional destination, and one Export button, including ADRs and beads plans.
 - Defer accepts an optional "revisit when" condition, shown on the question and in the report's Deferred section; reopen clears it.
 - Add `/grill fork [id]` to start a new interview seeded with a finished interview's glossary, facts, risks, and intent.
 - Show a `(N)` count of open questions in the tab title while the turn is yours, and offer a desktop notification when the agent releases the turn in a hidden tab.

@@ -118,7 +118,7 @@ describe("native prototype renderer", () => {
     expect(store.state.prototype?.version).toBe(2);
     expect(store.state.prototype?.thread.map((item) => item.text)).toEqual(["Add priority choice", "Added priority choice"]);
     const restored = loadStore(store.dir, "alice");
-    expect(() => store.exportVisual("prototype", "artifacts/tasks.html")).toThrow(/finished/);
+    expect(() => store.exportArtifact("prototype", "artifacts/tasks.html")).toThrow(/finished/);
     expect(restored.state.prototype).toEqual(store.state.prototype);
     store.publish({ questions: [{
       id: "q1",
@@ -129,8 +129,8 @@ describe("native prototype renderer", () => {
     expect(store.state.prototype?.stale).toBe(true);
     expect(store.state.diagram?.stale).toBe(true);
     store.finish();
-    const exported = store.exportVisual("prototype", "artifacts/tasks.html");
-    expect(statSync(exported).mode & 0o777).toBe(0o600);
+    const [exported] = store.exportArtifact("prototype", "artifacts/tasks.html");
+    expect(statSync(exported!).mode & 0o777).toBe(0o600);
   });
 
   test("rejects cross-screen dialog actions and invalid select set values", () => {

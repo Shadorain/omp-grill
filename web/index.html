@@ -148,12 +148,17 @@
     <section class="drawer-foot"><h3>Export to project</h3>
       <p id="export-locked" class="hint">Export is available after you finish.</p>
       <div id="export-row" hidden>
-        <input id="export-path" placeholder="docs/decision-report.md">
-        <div class="row">
-          <button id="export-report" class="btn btn-secondary" type="button">Export report</button>
-          <button id="export-proto" class="btn btn-secondary" type="button" hidden>Export prototype</button>
-          <button id="export-diagram" class="btn btn-secondary" type="button" hidden>Export diagram</button>
-        </div>
+        <label for="export-kind">Format</label>
+        <select id="export-kind">
+          <option value="report">Markdown report</option>
+          <option value="adr">Architecture decisions (ADRs)</option>
+          <option value="beads">Beads execution graph</option>
+          <option value="diagram">SVG diagram</option>
+          <option value="prototype">HTML prototype</option>
+        </select>
+        <label for="export-path" id="export-path-label">File path</label>
+        <input id="export-path" placeholder="docs/grill-report.md" aria-describedby="export-feedback">
+        <button id="export-submit" class="btn btn-secondary" type="button">Export</button>
       </div>
       <p id="export-feedback" class="hint" aria-live="polite"></p>
     </section>

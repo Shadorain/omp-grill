@@ -1,3 +1,5 @@
+import type { ExportKind } from "./exports";
+
 export type QuestionStatus = "open" | "answered" | "deferred";
 export interface DraftAnswer {
   option?: string;
@@ -154,8 +156,7 @@ export interface Store {
   saveDrafts(patch: DraftPatch): DraftState;
   updateContext(patch: Partial<InterviewContext>): void;
   previewReport(): string;
-  exportReport(path: string, overwrite?: boolean): string;
-  exportVisual(kind: "diagram" | "prototype", path: string, overwrite?: boolean): string;
+  exportArtifact(kind: ExportKind, path: string, overwrite?: boolean): string[];
   acknowledge(seq: number): void;
   setStatus(status: GrillState["status"], error?: string): void;
   finish(): string;

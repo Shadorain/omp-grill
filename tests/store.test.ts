@@ -358,17 +358,17 @@ describe("durable grill store", () => {
     const project = join(root, "proj");
     mkdirSync(join(project, "docs"), { recursive: true });
     store.state.project = project;
-    expect(() => store.exportReport("out.md")).toThrow(/finished/);
+    expect(() => store.exportArtifact("report", "out.md")).toThrow(/finished/);
     store.submit([{ type: "answer", q: "q1", option: "pg" }, { type: "finish" }]);
-    const out = store.exportReport("docs/grill.md");
+    const [out] = store.exportArtifact("report", "docs/grill.md");
     expect(out).toBe(join(project, "docs/grill.md"));
-    expect(() => store.exportReport("docs/grill.md")).toThrow(/exists/);
-    store.exportReport("docs/grill.md", true);
-    expect(() => store.exportReport("../escape.md")).toThrow(/within/);
-    expect(() => store.exportReport("/abs/path.md")).toThrow(/relative/);
+    expect(() => store.exportArtifact("report", "docs/grill.md")).toThrow(/exists/);
+    store.exportArtifact("report", "docs/grill.md", true);
+    expect(() => store.exportArtifact("report", "../escape.md")).toThrow(/within/);
+    expect(() => store.exportArtifact("report", "/abs/path.md")).toThrow(/relative/);
     symlinkSync(join(root, "outside.md"), join(project, "link.md"));
     writeFileSync(join(root, "outside.md"), "original");
-    expect(() => store.exportReport("link.md")).toThrow(/symlink/);
+    expect(() => store.exportArtifact("report", "link.md")).toThrow(/symlink/);
   });
 
 
