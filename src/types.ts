@@ -104,7 +104,10 @@ export interface Submission {
 export interface GrillState {
   id: string;
   owner: string;
+  /** Checkout the grill was started in; export paths resolve against it. */
   project: string;
+  /** Repository the grill belongs to; shared by every linked worktree. */
+  workspace: string;
   topic: string;
   createdAt: string;
   updatedAt: string;
@@ -159,6 +162,7 @@ export interface SessionSummary {
   dir: string;
   topic: string;
   project: string;
+  workspace: string;
   owner: string;
   status: GrillState["status"];
   createdAt: string;

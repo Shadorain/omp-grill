@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStore, loadStore } from "../src/store";
@@ -28,6 +28,35 @@ describe("session listing and safe resume", () => {
     const list = listSessions(home, "/p");
     expect(list.map((row) => row.topic)).toEqual(["New", "Old"]);
     expect(list.every((row) => row.project === "/p")).toBe(true);
+  });
+
+  test("a repository's sessions are listed from any of its worktrees", () => {
+    const home = root();
+    const repo = root();
+    const main = join(repo, "main");
+    const linked = join(repo, ".wt", "feature");
+    const gitDir = join(repo, "main", ".git");
+    mkdirSync(join(gitDir, "worktrees", "feature"), { recursive: true });
+    mkdirSync(linked, { recursive: true });
+    // A linked worktree points at the shared directory through `commondir`.
+    writeFileSync(join(linked, ".git"), `gitdir: ${join(gitDir, "worktrees", "feature")}\n`);
+    writeFileSync(join(gitDir, "worktrees", "feature", "commondir"), "../..\n");
+
+    createStore({ home, owner: "a", project: main, topic: "Shared" });
+    createStore({ home, owner: "a", project: root(), topic: "Elsewhere" });
+    expect(listSessions(home, linked).map((row) => row.topic)).toEqual(["Shared"]);
+    expect(listSessions(home, main).map((row) => row.topic)).toEqual(["Shared"]);
+  });
+
+  test("sessions written before worktree scoping keep their project identity", () => {
+    const home = root();
+    const store = createStore({ home, owner: "a", project: "/p", topic: "Legacy" });
+    const file = join(store.dir, "state.json");
+    const raw = JSON.parse(readFileSync(file, "utf8"));
+    delete raw.workspace;
+    writeFileSync(file, JSON.stringify(raw));
+    expect(listSessions(home, "/p").map((row) => row.topic)).toEqual(["Legacy"]);
+    expect(loadStore(store.dir, "a").state.workspace).toBe("/p");
   });
 
   test("missing home is an empty list, not a filesystem error", () => {

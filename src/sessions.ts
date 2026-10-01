@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { join } from "node:path";
 import { loadStore } from "./store";
 import type { SessionSummary, Store } from "./types";
+import { workspaceRoot } from "./workspace";
 
 function readSummary(dir: string): SessionSummary | undefined {
   try {
@@ -33,6 +34,7 @@ function readSummary(dir: string): SessionSummary | undefined {
       dir,
       topic: String(row.topic ?? ""),
       project: String(row.project ?? ""),
+      workspace: String(row.workspace ?? row.project ?? ""),
       owner: String(row.owner ?? ""),
       status: status as SessionSummary["status"],
       createdAt: String(row.createdAt ?? ""),
@@ -67,13 +69,16 @@ function hasLiveLease(dir: string): boolean {
   }
 }
 
- export function listSessions(home: string, project: string): SessionSummary[] {
-   if (!fs.existsSync(home)) return [];
-   const rows: SessionSummary[] = [];
-   for (const entry of fs.readdirSync(home, { withFileTypes: true })) {
+/** Grills belonging to the repository containing `cwd`, newest first. */
+export function listSessions(home: string, cwd: string): SessionSummary[] {
+  if (!fs.existsSync(home)) return [];
+  const workspace = workspaceRoot(cwd);
+  const rows: SessionSummary[] = [];
+  for (const entry of fs.readdirSync(home, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const summary = readSummary(join(home, entry.name));
-    if (summary?.project === project) rows.push(summary);
+    if (summary && workspaceRoot(summary.workspace) === workspace)
+      rows.push(summary);
   }
   return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

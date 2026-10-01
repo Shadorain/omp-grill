@@ -27,6 +27,10 @@ Keep these true when touching shared code; each has a test.
   tracked per interview and sequence so concurrent grills can't ack each other.
 - **Ownership follows the session.** Paused/errored interviews can be adopted by
   another session via `resumeStore`; live ones can't be stolen.
+- **Workspace identity is the repository.** `GrillState.workspace` is the git
+  common-dir parent (`src/workspace.ts`), so every worktree lists the same
+  grills; `project` stays the checkout and is the only root exports write
+  under. Sessions without `workspace` are backfilled from `project` on load.
 - **HTTP trust boundary.** Private fragment token on every `/api/*`, Host and
   Origin checks on POST, bounded body sizes. Pages carry no ambient auth.
 - **Finish is zero-token.** Report generation is a local render, never a model

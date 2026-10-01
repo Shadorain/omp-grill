@@ -19,6 +19,7 @@ import type {
 } from "./types";
 import { renderDiagram } from "./diagram";
 import { renderPrototype, validatePrototypeSpec } from "./prototype";
+import { workspaceRoot } from "./workspace";
 
 const MAX_ACTIONS = 100;
 const MAX_TEXT = 20_000;
@@ -1005,6 +1006,7 @@ export function createStore(input: {
   validText(input.owner, "owner");
   validText(input.project, "project");
   validText(input.topic, "topic");
+  const workspace = workspaceRoot(input.project);
   fs.mkdirSync(input.home, { recursive: true, mode: 0o700 });
   const id = randomUUID();
   const dir = join(input.home, id);
@@ -1014,6 +1016,7 @@ export function createStore(input: {
     id,
     owner: input.owner,
     project: input.project,
+    workspace,
     topic: input.topic,
     createdAt: now,
     updatedAt: now,
@@ -1061,6 +1064,10 @@ export function loadStore(dir: string, owner: string): Store {
     id: requiredText(value.id, "session id", 200),
     owner: requiredText(value.owner, "owner"),
     project: requiredText(value.project, "project"),
+    // Sessions written before worktree scoping carry no workspace.
+    workspace: value.workspace === undefined
+      ? workspaceRoot(requiredText(value.project, "project"))
+      : requiredText(value.workspace, "workspace"),
     topic: requiredText(value.topic, "topic"),
     createdAt: requiredText(value.createdAt, "createdAt", 100),
     updatedAt: requiredText(value.updatedAt, "updatedAt", 100),
