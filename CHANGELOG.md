@@ -25,6 +25,15 @@
 - Fix the missing `GET /api/diagram` route, question bodies never showing, and a browser draft with an unselected option being rejected by the server.
 - Cap per-question threads (200), answer history (50), and glossary/facts/risks (200 each) so long sessions stay under the state size limit.
 - Make `bun run demo` exit when OMP exits instead of hanging on stdin.
+- Fix error resume reloading a stale store underneath a live browser. Reuse attached runtimes, resume attached errors with the bare command, and skip finished interviews.
+- Track running agent batches by interview and sequence, including CLI submissions, so interleaved interviews cannot acknowledge or fail each other's work.
+- Wake the agent when starting from `/grill tui <topic>`, guard terminal submission actions while a batch is pending, and hide Grill tools immediately after the last interview finishes from either UI.
+- Show durable server recovery entries and agent error hints in the browser. Make both conflict choices safe to activate repeatedly and preserve the alternate draft copy.
+- Release retry requests after definitive client rejections so corrected input can be sent. Keep ambiguous timeouts, server errors, and network failures retryable with their original request.
+- Allow unsourced facts through the tool schema as well as the store.
+- Interpolate prototype form labels and update dependent displays in place, preserving focus and caret. Synchronize values after actions, reject cross-screen dialog actions, and reject select values outside the declared options.
+- Render diagram self-loops and sequence self-messages. Space sequence actors without overlap and scroll wide diagrams instead of shrinking their labels.
+- Fix the scripted demo's URL capture so `DEMO_URL` prints the current interview's private link.
 
 ## 1.0.0
 

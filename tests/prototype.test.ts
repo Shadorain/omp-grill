@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compactSubmission, createStore, loadStore } from "../src/store";
 import { validatePrototypeSpec } from "../src/prototype";
-import type { PrototypeSpec } from "../src/types";
+import { renderDiagram } from "../src/diagram";
+import type { PrototypeSpec, DiagramSpec } from "../src/types";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -130,5 +131,52 @@ describe("native prototype renderer", () => {
     store.finish();
     const exported = store.exportVisual("prototype", "artifacts/tasks.html");
     expect(statSync(exported).mode & 0o777).toBe(0o600);
+  });
+
+  test("rejects cross-screen dialog actions and invalid select set values", () => {
+    const spec = structuredClone(prototype);
+    spec.screens.push({ id: "other", title: "Other", blocks: [
+      { id: "other-dialog", kind: "dialog", label: "Other", children: [] },
+      { id: "bad-open", kind: "button", label: "Bad", action: { type: "open", target: "create-dialog" } },
+    ] });
+    expect(() => validatePrototypeSpec(spec)).toThrow(/another screen/);
+    spec.screens[2]!.blocks[1]!.action = { type: "open", target: "other-dialog" };
+    expect(validatePrototypeSpec(spec).screens[2]!.blocks[1]!.action!.target).toBe("other-dialog");
+    const s = structuredClone(prototype);
+    const setBtn = s.screens[0]!.blocks[1]!.children![4]!;
+    setBtn.action = { type: "set", target: "task-priority", value: "Bogus" };
+    expect(() => validatePrototypeSpec(s)).toThrow(/not valid option for select/);
+  });
+
+  test("self-transitions have visible labels and nonzero arrow geometry", () => {
+    const stateDiagram: DiagramSpec = {
+      title: "Retry", kind: "state", nodes: [{ id: "a", label: "Ready" }],
+      edges: [{ from: "a", to: "a", label: "retry" }],
+    };
+    expect(renderDiagram(stateDiagram)).toContain(">retry</text>");
+    const sequenceDiagram: DiagramSpec = {
+      ...stateDiagram, kind: "sequence",
+    };
+    const svg = renderDiagram(sequenceDiagram);
+    const arrow = svg.match(/<line [^>]*marker-end="url\(#arrow\)"[^>]*>/)?.[0] ?? "";
+    const coordinate = (name: string) => Number(arrow.match(new RegExp(`${name}="([^"]+)"`))?.[1]);
+    expect(Math.hypot(coordinate("x2") - coordinate("x1"), coordinate("y2") - coordinate("y1"))).toBeGreaterThan(0);
+    expect(svg).toContain(">retry</text>");
+  });
+
+  test("all 30 sequence actors fit without overlapping headers", () => {
+    const svg = renderDiagram({
+      title: "Actors", kind: "sequence",
+      nodes: Array.from({ length: 30 }, (_, i) => ({ id: `n${i}`, label: `Actor ${i + 1}` })),
+      edges: [],
+    });
+    const headers = [...svg.matchAll(/<rect x="([^"]+)"[^>]*width="([^"]+)"/g)]
+      .map((match) => ({ x: Number(match[1]), width: Number(match[2]) }));
+    const viewWidth = Number(svg.match(/viewBox="0 0 ([^ ]+)/)?.[1]);
+    for (const [index, header] of headers.entries()) {
+      expect(header.x).toBeGreaterThanOrEqual(0);
+      expect(header.x + header.width).toBeLessThanOrEqual(viewWidth);
+      if (index) expect(header.x).toBeGreaterThanOrEqual(headers[index - 1]!.x + headers[index - 1]!.width);
+    }
   });
 });

@@ -11,7 +11,6 @@ function escape(value: string): string {
 }
 
 export function renderDiagram(spec: DiagramSpec): string {
-  const width = 960;
   const columns = 4;
   const rows = Math.max(1, Math.ceil(spec.nodes.length / columns));
   const height =
@@ -20,9 +19,25 @@ export function renderDiagram(spec: DiagramSpec): string {
       : 90 + rows * 150;
   const nodes = spec.nodes;
   const index = new Map(nodes.map((node, i) => [node.id, i]));
-  const center = (i: number) => 90 + i * (780 / Math.max(1, nodes.length - 1));
+  let viewWidth = 960;
+  let center = (i: number) => 90 + i * (780 / Math.max(1, nodes.length - 1));
+  if (spec.kind === "sequence") {
+    const n = nodes.length;
+    const actorWidth = 130;
+    const minGap = 10;
+    const neededSpacing = actorWidth + minGap;
+    let span = 780;
+    if (n > 1) {
+      const origSpacing = span / (n - 1);
+      if (origSpacing < neededSpacing) {
+        span = neededSpacing * (n - 1);
+      }
+    }
+    viewWidth = 180 + span;
+    center = (i: number) => 90 + i * (span / Math.max(1, n - 1));
+  }
   const lines = [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escape(spec.title)}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewWidth} ${height}" role="img" aria-label="${escape(spec.title)}">`,
     `<title>${escape(spec.title)}</title>`,
     `<rect width="100%" height="100%" fill="#111827"/>`,
     `<text x="24" y="34" fill="#f8fafc" font-size="20">${escape(spec.title)}</text>`,
@@ -41,6 +56,16 @@ export function renderDiagram(spec: DiagramSpec): string {
       const y = 125 + i * 38;
       const x1 = center(from);
       const x2 = center(to);
+      if (from === to) {
+        // visible self-message loop to the right of the lifeline
+        const loopOut = 30;
+        const loopDown = 14;
+        lines.push(`<line x1="${x1}" y1="${y}" x2="${x1 + loopOut}" y2="${y}" stroke="#f0abfc"/>`);
+        lines.push(`<line x1="${x1 + loopOut}" y1="${y}" x2="${x1 + loopOut}" y2="${y + loopDown}" stroke="#f0abfc"/>`);
+        lines.push(`<line x1="${x1 + loopOut}" y1="${y + loopDown}" x2="${x1}" y2="${y + loopDown}" stroke="#f0abfc" marker-end="url(#arrow)"/>`);
+        if (edge.label) lines.push(`<text x="${x1 + loopOut / 2}" y="${y - 4}" text-anchor="middle" fill="#f5d0fe" font-size="12">${escape(edge.label)}</text>`);
+        return;
+      }
       lines.push(`<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#f0abfc" marker-end="url(#arrow)"/>`);
       if (edge.label) lines.push(`<text x="${(x1 + x2) / 2}" y="${y - 5}" text-anchor="middle" fill="#f5d0fe" font-size="12">${escape(edge.label)}</text>`);
     });
@@ -59,9 +84,17 @@ export function renderDiagram(spec: DiagramSpec): string {
     spec.edges.forEach((edge) => {
       const from = index.get(edge.from);
       const to = index.get(edge.to);
-      if (from === undefined || to === undefined || from === to) return;
+      if (from === undefined || to === undefined) return;
       const a = positions[from]!;
       const b = positions[to]!;
+      if (from === to) {
+        // visible self-loop above the node for state/self transitions
+        const hx = a.x;
+        const hy = a.y - halfHeight - 2;
+        lines.push(`<path d="M${hx-8},${hy} Q${hx+22},${hy-20} ${hx+4},${hy-28} Q${hx-14},${hy-20} ${hx},${hy}" fill="none" stroke="#f0abfc" stroke-width="1.5" marker-end="url(#arrow)"/>`);
+        if (edge.label) labels.push(`<text x="${hx + 6}" y="${hy - 30}" text-anchor="middle" fill="#f5d0fe" font-size="11" stroke="#111827" stroke-width="4" paint-order="stroke">${escape(edge.label)}</text>`);
+        return;
+      }
       const label = (x: number, y: number) => edge.label && labels.push(`<text x="${x}" y="${y}" text-anchor="middle" fill="#f5d0fe" font-size="11" stroke="#111827" stroke-width="4" paint-order="stroke">${escape(edge.label)}</text>`);
       if (a.y === b.y && Math.abs(from - to) > 1) {
         // A straight line would run through the nodes between them; arc over the row instead.

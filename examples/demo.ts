@@ -320,9 +320,10 @@ child.stdout.on("data", (chunk: Buffer) => {
         frame.type === "extension_ui_request" &&
         frame.method === "notify" &&
         typeof frame.message === "string" &&
-        frame.message.startsWith("Grill: ")
+        frame.message.startsWith("Grill ")
       ) {
-        const url = frame.message.split("\n")[0].slice(7);
+        const url = frame.message.match(/https?:\/\/[^\s]+/)?.[0];
+        if (!url) continue;
         writeFileSync(join(root, "url"), url, { mode: 0o600 });
         console.log(`DEMO_URL ${url}`);
       }

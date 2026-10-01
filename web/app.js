@@ -26,6 +26,7 @@
   let localWarning = "";
   let conflict = null;
   let retryRequest = null;
+  let restoredServerIds = new Set();
   let barNote = "";
   let diagramUrl = "";
   let prototypeUrl = "";
@@ -62,6 +63,17 @@
     const box = $("banner");
     box.hidden = false;
     box.textContent = `${offline ? "Server unreachable" : "Request failed"}: ${message}. ${offline ? "Local drafts are retained; reconnect to sync." : "Review the response and retry when ready."}`;
+  }
+  function syncBanner() {
+    if (conflict) return;
+    const box = $("banner");
+    if (state?.status === "error") {
+      box.hidden = false;
+      const err = safeText(state.error).trim();
+      box.textContent = err || "Use /grill resume to retry the saved batch.";
+    } else {
+      box.hidden = true;
+    }
   }
   function setBarNote(text) {
     barNote = safeText(text);
@@ -206,12 +218,16 @@
     keep.className = "btn btn-secondary";
     keep.textContent = "Keep my drafts";
     keep.addEventListener("click", () => {
+      const c = conflict;
+      if (!c) return;
+      const box = $("banner");
+      box.hidden = true;
       const currentLocal = { answers: clone(draftAnswers), threads: clone(draftThreads) };
-      stashDraftSet(conflict.remote, "Replaced by this tab's drafts");
+      stashDraftSet(c.remote, "Replaced by this tab's drafts");
       draftAnswers = currentLocal.answers;
       draftThreads = currentLocal.threads;
-      revision = conflict.remote.revision || revision;
-      state.drafts = conflict.remote;
+      revision = c.remote.revision || revision;
+      state.drafts = c.remote;
       conflict = null;
       dirty = true;
       persistLocal();
@@ -223,15 +239,18 @@
     use.className = "btn btn-ghost";
     use.textContent = "Use other tab's drafts";
     use.addEventListener("click", () => {
+      const c = conflict;
+      if (!c) return;
+      const box = $("banner");
+      box.hidden = true;
       const currentLocal = { answers: clone(draftAnswers), threads: clone(draftThreads) };
       stashDraftSet(currentLocal, "Replaced by the other tab's drafts");
-      draftAnswers = clone(conflict.remote.answers || {});
-      draftThreads = clone(conflict.remote.threads || {});
-      revision = conflict.remote.revision || revision;
-      state.drafts = conflict.remote;
+      draftAnswers = clone(c.remote.answers || {});
+      draftThreads = clone(c.remote.threads || {});
+      revision = c.remote.revision || revision;
+      state.drafts = c.remote;
       conflict = null;
       dirty = false;
-      box.hidden = true;
       persistLocal();
       render();
     });
@@ -254,11 +273,14 @@
     renderRecovery();
   }
   function renderRecovery() {
-    const rows = localRecovery();
+    const localRows = localRecovery();
+    const serverRecs = (state?.drafts?.recovery || []).filter((r) => r && r.id && !restoredServerIds.has(r.id));
     const root = $("recovery-list");
-    $("recovery-block").hidden = !rows.length;
-    rebuild(root, rows, () => {
-      for (const [index, item] of rows.entries()) {
+    const has = localRows.length + serverRecs.length;
+    $("recovery-block").hidden = !has;
+    const sig = [localRows, serverRecs.map((r) => r.id)];
+    rebuild(root, sig, () => {
+      for (const [index, item] of localRows.entries()) {
         const li = document.createElement("li");
         const restore = document.createElement("button");
         restore.type = "button";
@@ -268,8 +290,28 @@
         restore.addEventListener("click", () => {
           if (item.kind === "answer") setAnswerDraft(item.q, item);
           else draftThreads[item.q] = item.text;
-          rows.splice(index, 1);
-          try { localStorage.setItem(recoveryKey(), JSON.stringify(rows)); } catch (_) {}
+          localRows.splice(index, 1);
+          try { localStorage.setItem(recoveryKey(), JSON.stringify(localRows)); } catch (_) {}
+          markDirty();
+          render();
+        });
+        li.append(restore);
+        root.append(li);
+      }
+      for (const item of serverRecs) {
+        const li = document.createElement("li");
+        const restore = document.createElement("button");
+        restore.type = "button";
+        restore.className = "restore-item";
+        restore.textContent = `Restore ${item.kind}: ${state?.questions?.find((q) => q.id === item.q)?.title || item.q}`;
+        restore.title = `Server recovery ${item.at || ""}`.trim();
+        restore.addEventListener("click", () => {
+          if (item.kind === "answer") {
+            setAnswerDraft(item.q, item.answer || item);
+          } else {
+            draftThreads[item.q] = item.text;
+          }
+          if (item.id) restoredServerIds.add(item.id);
           markDirty();
           render();
         });
@@ -809,6 +851,8 @@
       if (!response.ok) throw new Error(response.status === 404 ? "No diagram yet. Generate one to inspect it." : `Diagram request failed (${response.status})`);
       const text = await response.text();
       const svg = safeSvg(text);
+      if (svg.viewBox.baseVal.width > 960)
+        svg.style.minWidth = `${svg.viewBox.baseVal.width}px`;
       $("artifact-holder").replaceChildren(svg);
       if (diagramUrl) URL.revokeObjectURL(diagramUrl);
       diagramUrl = URL.createObjectURL(new Blob([text], { type: "image/svg+xml" }));
@@ -977,6 +1021,7 @@
     renderKnowledge();
     renderReport();
     updateSync();
+    syncBanner();
     if (focusKey && !document.activeElement?.dataset?.focusKey) {
       const replacement = [...document.querySelectorAll("[data-focus-key]")].find((node) => node.dataset.focusKey === focusKey);
       replacement?.focus({ preventScroll: true });
@@ -1000,6 +1045,7 @@
       const oldArtifactSignature = artifactSignature;
       if (next.id !== state?.id) {
         state = next;
+        restoredServerIds = new Set();
         const current = next.drafts || { revision: 0, answers: {}, threads: {} };
         revision = current.revision || 0;
         draftAnswers = clone(current.answers || {});
@@ -1046,7 +1092,7 @@
           $("question-title").focus({ preventScroll: true });
         }
       }
-      if (state.status !== "error" && !conflict) $("banner").hidden = true;
+      syncBanner();
       if (dirty && !saving && !conflict) { clearTimeout(saveTimer); saveTimer = setTimeout(saveDrafts, 300); }
     } catch (error) {
       showError(error.message || "Unable to reach interview server.", !navigator.onLine);
@@ -1097,7 +1143,12 @@
         }
         throw new Error(result.error || "Drafts changed; review current drafts before retrying.");
       }
-      if (!response.ok) throw new Error(result.error || `Submission rejected (${response.status}).`);
+      if (!response.ok) {
+        if (response.status >= 400 && response.status < 500 && response.status !== 408) {
+          retryRequest = null;
+        }
+        throw new Error(result.error || `Submission rejected (${response.status}).`);
+      }
       if (result.drafts) { revision = result.drafts.revision || revision; state.drafts = result.drafts; }
       for (const action of request.clearActions) {
         if (action.type === "answer" && JSON.stringify(draftAnswers[action.q] ?? null) === JSON.stringify(request.snapshots.answers[action.q] ?? null)) delete draftAnswers[action.q];
@@ -1120,7 +1171,11 @@
       return true;
     } catch (error) {
       showError(error.message || "Submission failed", !navigator.onLine);
-      setBarNote(`Not confirmed: ${error.message}. Retry uses the exact saved request; drafts remain.`);
+      if (retryRequest) {
+        setBarNote(`Not confirmed: ${error.message}. Retry uses the exact saved request; drafts remain.`);
+      } else {
+        setBarNote("Submission rejected. Edit and resend a corrected request.");
+      }
       return false;
     } finally {
       sending = false;
@@ -1266,7 +1321,7 @@
       if (state?.status !== "finished") postActions(null, retryRequest ? { retry: true } : { drafts: true });
     }
   });
-  window.addEventListener("online", () => { if (state?.status !== "error" && !conflict) $("banner").hidden = true; updateSync(); });
+  window.addEventListener("online", () => { syncBanner(); updateSync(); });
   window.addEventListener("offline", () => { showError("The browser is offline.", true); updateSync(); });
   window.addEventListener("beforeunload", (event) => { if (dirty || saving || sending) { event.preventDefault(); event.returnValue = ""; } });
   refresh();

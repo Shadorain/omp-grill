@@ -46,9 +46,15 @@ You can keep several interviews open. Use `/grill use <id>` to select the one th
 
 Run `/grill` to list open interviews and commands. Tab completion suggests commands, interview IDs, questions, and options.
 
+If an agent turn stops, the page shows its error and keeps the saved batch. Run `/grill resume` in the owning OMP session to retry it. Resuming an attached error keeps the same page URL; finished interviews are excluded from resume.
+
 ![Task board prototype](docs/prototype.png)
 
 The Visual view can show a system diagram or an interactive screen prototype. Prototypes run in a sandbox, so clicking inside one does not call the agent. Use diagrams for flows and architecture, and prototypes to explore a screen design.
+
+Recoverable drafts include server archives and copies saved by this browser. Restore an answer or message to stage it again; the archived copy stays available. If two tabs edit the same drafts, choose which copy to keep; the other remains recoverable.
+
+Prototype labels and displayed text update as you edit their inputs, without losing input focus or the caret. Dialog actions must target the current screen, and select actions must use a declared option. Wide sequence diagrams scroll horizontally so actor labels stay readable; self-transitions and self-messages are rendered.
 
 ### `/grill tui`
 
@@ -57,6 +63,8 @@ Prefer the terminal? Run `/grill tui` to open the selected interview inside your
 ![Session terminal](docs/tui.png)
 
 Use `j`/`k` to move between questions and `a`-`d` to stage an option. Press `enter` to send, `e` to explore, `x` to defer, or `f` twice to finish. Use `tab` to view the discussion and `esc` or `q` to close the inspector. Closing the inspector leaves the interview open.
+
+Starting with `/grill tui <topic>` also wakes the agent to publish the first questions. While a batch is pending, drafts stay editable, but Send, Explore, Defer, and Finish wait for acknowledgement.
 
 ## Configuration
 

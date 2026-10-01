@@ -117,27 +117,36 @@ export function validatePrototypeSpec(input: unknown): PrototypeSpec {
     app = { name: text(input.app.name, "app name", 200), ...(optionalText(input.app, "route", 300) === undefined ? {} : { route: input.app.route as string }), ...(chrome === undefined ? {} : { chrome: chrome.map((item) => text(item, "chrome label", 200)) }) };
   }
   const blockKind = new Map<string, PrototypeBlock["kind"]>();
-  const recordKinds = (nodes: PrototypeBlock[]): void => {
+  const blockOptions = new Map<string, string[]>();
+  const dialogScreen = new Map<string, string>();
+  const recordMeta = (nodes: PrototypeBlock[], scrId?: string): void => {
     for (const node of nodes) {
       blockKind.set(node.id, node.kind);
-      recordKinds(node.children ?? []);
+      if (node.kind === "select" && node.options) blockOptions.set(node.id, node.options);
+      if (node.kind === "dialog" && scrId) dialogScreen.set(node.id, scrId);
+      recordMeta(node.children ?? [], scrId);
     }
   };
-  for (const screen of screens) recordKinds(screen.blocks);
-  for (const screen of screens) for (const block of screen.blocks) {
+  for (const screen of screens) recordMeta(screen.blocks, screen.id);
+  for (const screen of screens) {
     const visit = (node: PrototypeBlock): void => {
       if (node.action) {
         const { type, target } = node.action;
         if ((type === "navigate" || type === "submit") && !screenIds.has(target)) throw new Error(`Action references unknown screen: ${target}`);
         if (type === "set" && node.action.value === undefined) throw new Error(`Set action requires a value: ${node.id}`);
         if (type === "set" && blockKind.get(target) === "checkbox" && !["true", "false"].includes(node.action.value ?? "")) throw new Error(`Set action requires a checkbox value: ${target}`);
+        if (type === "set" && blockKind.get(target) === "select" && !(blockOptions.get(target) ?? []).includes(node.action.value ?? "")) throw new Error(`Set action value not valid option for select ${target}`);
         if (type === "set" && !["input", "select", "checkbox"].includes(blockKind.get(target) ?? "")) throw new Error(`Set action references invalid control: ${target}`);
         if (type === "toggle" && blockKind.get(target) !== "checkbox") throw new Error(`Toggle action references invalid control: ${target}`);
         if ((type === "open" || type === "close") && blockKind.get(target) !== "dialog") throw new Error(`Dialog action references invalid dialog: ${target}`);
+        if ((type === "open" || type === "close")) {
+          const owner = dialogScreen.get(target);
+          if (owner !== screen.id) throw new Error(`Dialog action references dialog from another screen: ${target}`);
+        }
       }
       for (const child of node.children ?? []) visit(child);
     };
-    visit(block);
+    for (const block of screen.blocks) visit(block);
   }
   return { title, start, ...(app === undefined ? {} : { app }), ...(theme === undefined ? {} : { theme }), screens };
 }
@@ -224,6 +233,23 @@ function seed(blocks) {
 function display(value) {
   return String(value ?? '').replace(/\\{\\{([^{}]+)\\}\\}/g, (_, id) => String(values[id] ?? ''));
 }
+function refreshDisplays() {
+  [host, nav].forEach((root) => {
+    if (!root) return;
+    root.querySelectorAll('[data-tpl]').forEach((el) => {
+      if (el.dataset.tpl != null) el.textContent = display(el.dataset.tpl);
+    });
+  });
+}
+function syncControlValue(id) {
+  const control = document.getElementById('control-' + id);
+  if (!control) return;
+  if (control instanceof HTMLInputElement && control.type === 'checkbox') {
+    control.checked = !!values[id];
+  } else {
+    control.value = String(values[id] ?? '');
+  }
+}
 function go(target) {
   screen = target;
   for (const id of Object.keys(dialogs)) dialogs[id] = false;
@@ -232,11 +258,21 @@ function go(target) {
 function act(action) {
   if (!action) return;
   if (action.type === 'navigate' || action.type === 'submit') { go(action.target); return; }
+  const changesValue = action.type === 'set' || action.type === 'toggle';
   if (action.type === 'open') dialogs[action.target] = true;
   else if (action.type === 'close') dialogs[action.target] = false;
   else if (action.type === 'toggle') values[action.target] = !values[action.target];
   else if (action.type === 'set') values[action.target] = typeof values[action.target] === 'boolean' ? action.value === 'true' : action.value ?? '';
-  draw();
+  refreshDisplays();
+  if (changesValue) syncControlValue(action.target);
+  if (host) {
+    for (const dialog of host.querySelectorAll('dialog')) {
+      const did = dialog.dataset.dialog;
+      const should = !!dialogs[did];
+      if (should && !dialog.open) dialog.showModal();
+      else if (!should && dialog.open) dialog.close();
+    }
+  }
 }
 function make(block) {
   const wrap = element('section', 'block');
@@ -244,12 +280,16 @@ function make(block) {
   let node;
   if (block.kind === 'heading' || block.kind === 'text') {
     node = element(block.kind === 'heading' ? 'h2' : 'p');
-    node.textContent = display(block.text ?? block.label ?? '');
+    const tpl = block.text ?? block.label ?? '';
+    node.textContent = display(tpl);
+    node.dataset.tpl = tpl;
     wrap.append(node);
   } else if (block.kind === 'button') {
     node = element('button');
     node.type = 'button';
-    node.textContent = display(block.label || block.text || 'Continue');
+    const tpl = block.label || block.text || 'Continue';
+    node.textContent = display(tpl);
+    node.dataset.tpl = tpl;
     node.addEventListener('click', (event) => { event.stopPropagation(); act(block.action); });
     wrap.append(node);
   } else if (['input', 'select', 'checkbox'].includes(block.kind)) {
@@ -271,11 +311,13 @@ function make(block) {
     else node.value = values[block.id];
     node.addEventListener(block.kind === 'input' ? 'input' : 'change', () => {
       values[block.id] = block.kind === 'checkbox' ? node.checked : node.value;
+      refreshDisplays();
     });
     if (block.label) {
       const label = element('label');
       label.htmlFor = id;
-      label.textContent = block.label;
+      label.textContent = display(block.label);
+      label.dataset.tpl = block.label;
       wrap.append(label);
     }
     wrap.append(node);
@@ -292,7 +334,7 @@ function make(block) {
     wrap.append(node);
   } else if (block.kind === 'list') {
     node = element('ul');
-    for (const value of block.options || []) { const item = element('li'); item.textContent = display(value); node.append(item); }
+    for (const value of block.options || []) { const item = element('li'); item.textContent = display(value); item.dataset.tpl = value; node.append(item); }
     for (const child of block.children || []) { const item = element('li'); item.append(make(child)); node.append(item); }
     wrap.append(node);
   } else if (block.kind === 'dialog') {
@@ -301,12 +343,12 @@ function make(block) {
     node.dataset.dialog = block.id;
     node.addEventListener('cancel', () => { dialogs[block.id] = false; });
     node.addEventListener('close', () => { if (node.isConnected) dialogs[block.id] = false; });
-    if (block.label) { const title = element('h2'); title.textContent = block.label; node.append(title); }
+    if (block.label) { const title = element('h2'); title.textContent = display(block.label); title.dataset.tpl = block.label; node.append(title); }
     for (const child of block.children || []) node.append(make(child));
     wrap.append(node);
   } else {
-    if (block.label) { node = element('h3'); node.textContent = block.label; wrap.append(node); }
-    if (block.text) { node = element('p'); node.textContent = display(block.text); wrap.append(node); }
+    if (block.label) { node = element('h3'); node.textContent = display(block.label); node.dataset.tpl = block.label; wrap.append(node); }
+    if (block.text) { node = element('p'); node.textContent = display(block.text); node.dataset.tpl = block.text; wrap.append(node); }
     for (const child of block.children || []) wrap.append(make(child));
   }
   if (block.action && block.kind === 'card') {
@@ -325,14 +367,16 @@ function draw() {
   for (const item of spec.screens) {
     const button = element('button');
     button.type = 'button';
-    button.textContent = item.title;
+    button.textContent = display(item.title);
+    button.dataset.tpl = item.title;
     button.setAttribute('aria-current', item.id === screen ? 'page' : 'false');
     button.addEventListener('click', () => go(item.id));
     nav.append(button);
     if (item.id !== screen) continue;
     const section = element('section', 'screen active');
     const title = element('h1');
-    title.textContent = item.title;
+    title.textContent = display(item.title);
+    title.dataset.tpl = item.title;
     section.append(title);
     const grid = element('div', 'blocks layout-' + (item.layout || 'dashboard'));
     for (const block of item.blocks) grid.append(make(block));

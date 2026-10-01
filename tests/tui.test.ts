@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { GrillInspector, grillWidgetLines, type GrillTheme } from "../src/tui.ts";
+import { GrillInspector, type GrillTheme } from "../src/tui.ts";
 import type { GrillState } from "../src/types.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createStore } from "../src/store.ts";
 
 const theme: GrillTheme = {
   fg: (_tone, value) => value,
@@ -35,37 +39,44 @@ function state(): GrillState {
 }
 
 describe("grill session TUI", () => {
-  test("widget names the topic and progress", () => {
-    const lines = grillWidgetLines(state(), 80, theme).join("\n");
-    expect(lines).toContain("Accent");
-    expect(lines).toContain("0/1");
-    expect(lines).toContain("waiting");
-  });
-
-  test("letter key stages the matching option and does not steal explore", () => {
-    const current = state();
-    const staged: string[] = [];
-    const explored: string[] = [];
-    const inspector = new GrillInspector(
-      () => current,
-      {
-        close: () => {},
-        stage: (_questionId, optionId) => staged.push(optionId),
-        send: () => {},
-        finish: () => {},
-        explore: (questionId) => explored.push(questionId),
-        defer: () => {},
-      },
-      () => 40,
-      theme,
-      { matches: () => false },
-    );
-    inspector.handleInput("a");
-    inspector.handleInput("e");
-    const rendered = inspector.render(80).join("\n");
-    expect(staged).toEqual(["blue"]);
-    expect(explored).toEqual(["color"]);
-    expect(rendered).toContain("RECOMMENDED");
-    expect(rendered).not.toContain("border");
+  test("pending submissions block new actions but allow staging and resume after acknowledgement", () => {
+    const home = mkdtempSync(join(tmpdir(), "omp-grill-inspector-"));
+    try {
+      const store = createStore({ home, owner: "me", project: home, topic: "Accent" });
+      const question = state().questions[0]!;
+      store.publish({ questions: [{
+        id: question.id, title: question.title,
+        options: question.options, recommendation: question.recommendation,
+      }] });
+      const inspector = new GrillInspector(
+        () => store.state,
+        {
+          close() {},
+          stage(q, option) {
+            store.saveDrafts({ revision: store.state.drafts.revision, answers: { [q]: { option } } });
+          },
+          send() {
+            store.submit([{ type: "answer", q: question.id, ...store.state.drafts.answers[question.id] }]);
+          },
+          finish() { store.finish(); },
+          explore(q) { store.submit([{ type: "explore", q }]); },
+          defer(q) { store.submit([{ type: "defer", q }]); },
+        },
+        () => 40, theme, { matches: () => false },
+      );
+      const pending = store.submit([{ type: "thread", q: question.id, text: "Keep this choice open." }]);
+      inspector.handleInput("a");
+      expect(store.state.drafts.answers[question.id]).toEqual({ option: "blue" });
+      for (const key of ["e", "x", "\r", "f", "f"]) inspector.handleInput(key);
+      expect(store.state.pending).toEqual(pending);
+      expect(store.state.seq).toBe(1);
+      expect(store.state.status).toBe("working");
+      store.publish({ handled: pending.seq });
+      inspector.handleInput("e");
+      expect(store.state.pending?.actions).toEqual([{ type: "explore", q: question.id }]);
+      expect(store.state.seq).toBe(2);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

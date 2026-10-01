@@ -11,7 +11,7 @@ import { join } from "node:path";
  import { startServer } from "./server.ts";
  import { listSessions, resumeStore } from "./sessions.ts";
  import { createGrillInspector, createGrillWidget, type GrillTheme } from "./tui.ts";
- import type { Action, GrillServer, Publish, Store } from "./types.ts";
+ import type { Action, GrillServer, Publish, SessionSummary, Store } from "./types.ts";
 import { readServerSettings } from "./settings.ts";
 
 function grillHome() {
@@ -65,7 +65,7 @@ export default function grillExtension(pi: ExtensionAPI) {
   };
   const attached = new Map<string, Runtime>();
    let currentId: string | undefined;
-   let runningBatch: { id: string; seq: number } | undefined;
+   const runningBatches = new Map<string, number>();
    let projectDir = process.cwd();
    let tuiMode = false;
    let overlayTui: { requestRender(): void } | undefined;
@@ -111,12 +111,26 @@ export default function grillExtension(pi: ExtensionAPI) {
       throw new Error("That matches more than one grill. Use the id.");
     return matches[0];
   }
+  function resumeRuntime(session: SessionSummary, ctx: ExtensionContext): Runtime {
+    const existing = attached.get(session.id);
+    const owner = ctx.sessionManager.getSessionId();
+    if (existing) {
+      if (existing.owner !== owner)
+        throw new Error("Grill attached to another OMP session.");
+      return existing;
+    }
+    return {
+      store: session.owner === owner ? loadStore(session.dir, owner) : resumeStore(session.dir, owner),
+      owner,
+      ctx,
+    };
+  }
   async function closeOne(id: string, pause: boolean) {
     const runtime = attached.get(id);
     if (!runtime) return;
     attached.delete(id);
     if (currentId === id) currentId = attached.keys().next().value;
-    if (runningBatch?.id === id) runningBatch = undefined;
+    runningBatches.delete(id);
     if (pause && runtime.store.state.status !== "finished")
       runtime.store.setStatus("paused");
     await runtime.server?.close();
@@ -136,6 +150,7 @@ export default function grillExtension(pi: ExtensionAPI) {
     overlayTui?.requestRender();
     if (!runtime) return;
     const { store, ctx } = runtime;
+    void syncTools().catch((error) => ctx.ui.notify(String(error), "error"));
     const answered = store.state.questions.filter(
       (q) => q.status === "answered",
     ).length;
@@ -161,12 +176,7 @@ export default function grillExtension(pi: ExtensionAPI) {
           throw new Error(
             "Grill detached from its OMP session. Resume it from that session.",
           );
-        select(runtime);
-        runningBatch = { id: runtime.store.state.id, seq: submission.seq };
-        pi.sendUserMessage(compactSubmission(runtime.store.state, submission), {
-          deliverAs: "followUp",
-        });
-        status();
+        wake(runtime, submission);
       },
     });
     status();
@@ -199,6 +209,19 @@ export default function grillExtension(pi: ExtensionAPI) {
     store.setStatus("working");
     status();
     notifyUrl(ctx, url, runtime);
+    return runtime;
+  }
+  function startTurn(runtime: Runtime) {
+    runningBatches.set(runtime.store.state.id, 0);
+    pi.sendMessage(
+      {
+        customType: "omp-grill.start",
+        content: `Start grill ${runtime.store.state.id} for ${JSON.stringify(runtime.store.state.topic)}. Call grill_publish with the first frontier and that id. Other open grills stay open.`,
+        display: true,
+        attribution: "agent",
+      },
+      { triggerTurn: true, deliverAs: "followUp" },
+    );
   }
   function commandHelp() {
     const open = [...attached.values()]
@@ -272,7 +295,7 @@ export default function grillExtension(pi: ExtensionAPI) {
   }
   function wake(runtime: Runtime, submission: { seq: number; actions: Action[] }) {
     select(runtime);
-    runningBatch = { id: runtime.store.state.id, seq: submission.seq };
+    runningBatches.set(runtime.store.state.id, submission.seq);
     pi.sendUserMessage(compactSubmission(runtime.store.state, submission), {
       deliverAs: "followUp",
     });
@@ -404,10 +427,7 @@ export default function grillExtension(pi: ExtensionAPI) {
                 : { option: answer[2], ...(answer[3] ? { text: answer[3] } : {}) }),
             }])
           : runtime.store.submit([{ type: "thread", q: reply![1], text: reply![2] }]);
-        pi.sendUserMessage(compactSubmission(runtime.store.state, submission), {
-          deliverAs: "followUp",
-        });
-        status();
+        wake(runtime, submission);
         ctx.ui.notify(`Submitted ${answer ? "answer" : "message"} to the agent. Continue in the browser or terminal.`, "info");
         return;
       }
@@ -504,31 +524,7 @@ export default function grillExtension(pi: ExtensionAPI) {
       }
       if (command === "finish") {
         const runtime = owned(ctx);
-        if (runtime.store.state.pending)
-          throw new Error(
-            "A submission still needs acknowledgement. Resume it before finishing.",
-          );
-        const actions: Action[] = [];
-        const snapshot = runtime.store.state;
-        for (const question of snapshot.questions) {
-          const draft = snapshot.drafts.answers[question.id];
-          const text = draft?.text?.trim();
-          if (draft?.option || text)
-            actions.push({
-              type: "answer",
-              q: question.id,
-              ...(draft?.option ? { option: draft.option } : {}),
-              ...(text ? { text } : {}),
-            });
-          const message = snapshot.drafts.threads[question.id]?.trim();
-          if (message)
-            actions.push({ type: "thread", q: question.id, text: message });
-        }
-        if (actions.length)
-          runtime.store.submit([...actions, { type: "finish" }], {
-            draftRevision: snapshot.drafts.revision,
-          });
-        const report = runtime.store.finish();
+        const report = finishRuntime(runtime);
         await syncTools();
         status();
         ctx.ui.notify(`Grill finished: ${report}`, "info");
@@ -543,106 +539,63 @@ export default function grillExtension(pi: ExtensionAPI) {
       }
       if (command === "resume" || command.startsWith("resume ")) {
         const query = command === "resume" ? "" : command.slice(7).trim();
-        const owner = ctx.sessionManager.getSessionId();
+        const resumable = listSessions(grillHome(), ctx.cwd).filter(
+          (session) => session.status === "paused" || session.status === "error",
+        );
         let picked: Runtime | undefined;
         if (query) {
-          const matches = listSessions(grillHome(), ctx.cwd).filter(
-            (session) =>
-              (session.status === "paused" || session.status === "error") &&
-              (session.id.startsWith(query) || session.topic === query),
+          const matches = resumable.filter(
+            (session) => session.id.startsWith(query) || session.topic === query,
           );
           if (matches.length !== 1)
             throw new Error(matches.length ? "That matches more than one paused grill." : "No paused grill matches that id.");
-          const chosen = matches[0];
-          if (!chosen) return;
-          picked = {
-            store: chosen.owner === owner ? loadStore(chosen.dir, owner) : resumeStore(chosen.dir, owner),
-            owner,
-            ctx,
-          };
-        } else if (!attached.size) {
-          const entries = ctx.sessionManager.getBranch();
-          const entry = [...entries]
-            .reverse()
-            .find((e) => e.type === "custom" && e.customType === ENTRY);
-          if (entry?.type === "custom" && entry.data) {
-            const data = entry.data;
-            if (
-              typeof data === "object" &&
-              "dir" in data &&
-              typeof data.dir === "string"
-            ) {
-              const summary = listSessions(grillHome(), ctx.cwd).find(
-                (s) => s.dir === data.dir,
-              );
-              const store =
-                !summary || summary.owner === owner
-                  ? loadStore(data.dir, owner)
-                  : resumeStore(data.dir, owner);
-              picked = { store, owner, ctx };
+          picked = resumeRuntime(matches[0]!, ctx);
+        } else {
+          const current = runtimeOf(currentId);
+          if (current?.store.state.status === "error")
+            picked = current;
+          else if (!attached.size) {
+            const entry = [...ctx.sessionManager.getBranch()].reverse().find(
+              (entry) => entry.type === "custom" && entry.customType === ENTRY,
+            );
+            if (entry?.type === "custom" && entry.data && typeof entry.data === "object" && "dir" in entry.data) {
+              const dir = entry.data.dir;
+              if (typeof dir === "string") {
+                const session = resumable.find((session) => session.dir === dir);
+                if (session) picked = resumeRuntime(session, ctx);
+              }
             }
           }
         }
         if (!picked) {
-          const resumable = listSessions(grillHome(), ctx.cwd).filter(
-            (s) =>
-              (s.status === "paused" || s.status === "error") &&
-              ![...attached.values()].some((runtime) => runtime.store.dir === s.dir),
-          );
-          if (!resumable.length)
-            throw new Error("No paused grills.");
-          const labels = resumable.map((s) => `${s.topic} · ${s.id.slice(0, 8)}`);
-          const label = await ctx.ui.select(
-            "Resume which grill?",
-            resumable.map((s, index) => ({
-              label: labels[index],
-              description: `${s.status} · ${s.answered} answered · ${s.open} open`,
-            })),
-          );
-          if (!label) return;
-          const chosen = resumable[labels.indexOf(label)];
-          if (!chosen) return;
-          picked = {
-            store:
-              chosen.owner === owner
-                ? loadStore(chosen.dir, owner)
-                : resumeStore(chosen.dir, owner),
-            owner,
-            ctx,
-          };
+          if (!resumable.length) throw new Error("No paused grills.");
+          if (resumable.length === 1) picked = resumeRuntime(resumable[0]!, ctx);
+          else {
+            const labels = resumable.map((session) => `${session.topic} · ${session.id.slice(0, 8)}`);
+            const label = await ctx.ui.select(
+              "Resume which grill?",
+              resumable.map((session, index) => ({
+                label: labels[index],
+                description: `${session.status} · ${session.answered} answered · ${session.open} open`,
+              })),
+            );
+            if (!label) return;
+            const chosen = resumable[labels.indexOf(label)];
+            if (!chosen) return;
+            picked = resumeRuntime(chosen, ctx);
+          }
         }
         select(picked);
         picked.ctx = ctx;
-        if (picked.store.state.status !== "finished")
-          picked.store.setStatus(
-            picked.store.state.pending ? "working" : "waiting",
-          );
+        picked.store.setStatus(picked.store.state.pending ? "working" : "waiting");
         const url = await serve(picked);
         await syncTools();
         notifyUrl(ctx, url, picked);
-        if (picked.store.state.pending) {
-          runningBatch = {
-            id: picked.store.state.id,
-            seq: picked.store.state.pending.seq,
-          };
-          pi.sendUserMessage(
-            compactSubmission(picked.store.state, picked.store.state.pending),
-            { deliverAs: "followUp" },
-          );
-        } else if (
-          !picked.store.state.questions.length &&
-          picked.store.state.status !== "finished"
-        ) {
+        if (picked.store.state.pending)
+          wake(picked, picked.store.state.pending);
+        else if (!picked.store.state.questions.length) {
           picked.store.setStatus("working");
-          pi.sendMessage(
-            {
-              customType: "omp-grill.start",
-              content: `Start grill ${picked.store.state.id} for ${JSON.stringify(picked.store.state.topic)}. Call grill_publish with the first frontier and that id.`,
-              display: true,
-              attribution: "agent",
-            },
-            { triggerTurn: true, deliverAs: "followUp" },
-          );
+          startTurn(picked);
         }
         status();
         return;
@@ -655,20 +608,11 @@ export default function grillExtension(pi: ExtensionAPI) {
           ctx.ui.notify("Session interview closed. The grill stays open.", "info");
           return;
         }
-        if (topic) await start(topic, ctx);
+        if (topic) startTurn(await start(topic, ctx));
         await openTui(ctx);
         return;
       }
-      await start(command, ctx);
-      pi.sendMessage(
-        {
-          customType: "omp-grill.start",
-          content: `Start grill for ${JSON.stringify(command)}. Call grill_publish with topic and the first frontier. Other open grills stay open.`,
-          display: true,
-          attribution: "agent",
-        },
-        { triggerTurn: true, deliverAs: "followUp" },
-      );
+      startTurn(await start(command, ctx));
     },
   });
 
@@ -735,7 +679,7 @@ export default function grillExtension(pi: ExtensionAPI) {
               z.object({
                 id: z.string(),
                 text: z.string(),
-                source: z.string(),
+                source: z.string().optional(),
               }),
             )
             .optional(),
@@ -862,40 +806,29 @@ export default function grillExtension(pi: ExtensionAPI) {
   });
   pi.on("before_agent_start", async (event, ctx) => {
     await syncTools();
-    const runtime = runtimeOf(currentId);
-    if (
-      ctx.agent.kind === "sub" ||
-      !runtime ||
-      runtime.owner !== ctx.sessionManager.getSessionId() ||
-      runtime.store.state.status !== "working"
-    )
-      return;
-    if (!runningBatch || runningBatch.id !== runtime.store.state.id)
-      runningBatch = {
-        id: runtime.store.state.id,
-        seq: runtime.store.state.pending?.seq ?? 0,
-      };
+    if (ctx.agent.kind === "sub") return;
+    let working = false;
+    for (const runtime of attached.values()) {
+      if (runtime.owner === ctx.sessionManager.getSessionId() && runtime.store.state.status === "working") {
+        runningBatches.set(runtime.store.state.id, runtime.store.state.pending?.seq ?? 0);
+        working = true;
+      }
+    }
+    if (!working) return;
     return { systemPrompt: [...event.systemPrompt, instruction] };
   });
   pi.on("agent_end", (_event, ctx) => {
-    const runtime = runningBatch ? attached.get(runningBatch.id) : undefined;
-    if (
-      ctx.agent.kind === "sub" ||
-      !runtime ||
-      runtime.owner !== ctx.sessionManager.getSessionId()
-    )
-      return;
-    const ownsBatch =
-      (runtime.store.state.pending?.seq ?? 0) === runningBatch?.seq;
-    if (
-      ownsBatch &&
-      runtime.store.state.status === "working" &&
-      !ctx.hasPendingMessages()
-    )
-      runtime.store.setStatus(
-        "error",
-        "Agent stopped without publishing. Use /grill resume to retry the saved batch.",
-      );
+    if (ctx.agent.kind === "sub" || ctx.hasPendingMessages()) return;
+    for (const [id, seq] of runningBatches) {
+      const runtime = attached.get(id);
+      if (!runtime || runtime.owner !== ctx.sessionManager.getSessionId()) continue;
+      if (runtime.store.state.status === "working" && (runtime.store.state.pending?.seq ?? 0) === seq)
+        runtime.store.setStatus(
+          "error",
+          "Agent stopped without publishing. Use /grill resume to retry the saved batch.",
+        );
+      runningBatches.delete(id);
+    }
     status();
   });
   pi.on("session_switch", async () => {

@@ -177,37 +177,48 @@ export class GrillInspector implements Component {
       return;
     }
     const question = questions[this.selected];
-    if (!question || this.getState()?.status === "finished") return;
-    const reserved = new Set(["e", "x", "f", "j", "k", "q"]);
-    const letter = LETTERS.indexOf(data.toLowerCase());
-    if (!reserved.has(data.toLowerCase()) && letter >= 0 && letter < question.options.length && data.length === 1) {
-      const option = question.options[letter];
-      if (option) this.actions.stage(question.id, option.id);
-      this.confirmFinish = false;
-      return;
-    }
-    if (this.keys.matches(data, "tui.select.confirm") || data === "\r" || data === "\n") {
-      this.actions.send();
-      this.note = "Sent staged answers.";
-      return;
-    }
-    if (data === "e") {
-      this.actions.explore(question.id);
-      this.note = "Explore sent.";
-      return;
-    }
-    if (data === "x") {
-      this.actions.defer(question.id);
-      this.note = "Deferred.";
-      return;
-    }
-    if (data === "f") {
-      if (!this.confirmFinish) {
-        this.confirmFinish = true;
-        this.note = "Press f again to finish.";
+    const state = this.getState();
+    if (!question || !state || state.status === "finished") return;
+    try {
+      const reserved = new Set(["e", "x", "f", "j", "k", "q"]);
+      const letter = LETTERS.indexOf(data.toLowerCase());
+      if (!reserved.has(data.toLowerCase()) && letter >= 0 && letter < question.options.length && data.length === 1) {
+        const option = question.options[letter];
+        if (option) this.actions.stage(question.id, option.id);
+        this.confirmFinish = false;
         return;
       }
-      this.actions.finish();
+      if (state.pending || state.status === "working") {
+        this.confirmFinish = false;
+        this.note = state.error || "Agent is working. Drafts stay editable; wait for acknowledgement.";
+        return;
+      }
+      if (this.keys.matches(data, "tui.select.confirm") || data === "\r" || data === "\n") {
+        this.actions.send();
+        this.note = "Sent staged answers.";
+        return;
+      }
+      if (data === "e") {
+        this.actions.explore(question.id);
+        this.note = "Explore sent.";
+        return;
+      }
+      if (data === "x") {
+        this.actions.defer(question.id);
+        this.note = "Deferred.";
+        return;
+      }
+      if (data === "f") {
+        if (!this.confirmFinish) {
+          this.confirmFinish = true;
+          this.note = "Press f again to finish.";
+          return;
+        }
+        this.actions.finish();
+      }
+    } catch (error) {
+      this.confirmFinish = false;
+      this.note = error instanceof Error ? error.message : String(error);
     }
   }
 }

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z, type ExtensionAPI, type ExtensionContext } from "@oh-my-pi/pi-coding-agent";
@@ -22,6 +22,9 @@ async function fixture(allowAgentStart?: boolean) {
   const entries: any[] = [];
   let active = ["read"];
   let command: any;
+  let queued = false;
+  const urls: string[] = [];
+
   const pi = {
     zod: z,
     registerTool(tool: any) {
@@ -40,8 +43,16 @@ async function fixture(allowAgentStart?: boolean) {
     cwd: "/demo",
     hasUI: false,
     agent: { kind: "main" },
+    hasPendingMessages: () => queued,
     sessionManager: { getSessionId: () => "test-owner", getBranch: () => entries },
-    ui: { notify() {}, setStatus() {}, setWidget() {} },
+    ui: {
+      notify(text: string) {
+        const url = text.match(/https?:\/\/[^\s]+/)?.[0];
+        if (url) urls.push(url);
+      },
+      setStatus() {},
+      setWidget() {},
+    },
   } as unknown as ExtensionContext;
   grillExtension(pi as unknown as ExtensionAPI);
   cleanup.push(async () => {
@@ -57,7 +68,13 @@ async function fixture(allowAgentStart?: boolean) {
     home,
     active: () => active,
     command: (args: string): Promise<void> => command.handler(args, ctx),
-    publish: (params: unknown): Promise<unknown> => tools.get("grill_publish").execute("call", params, undefined, undefined, ctx),
+    publish: (params: unknown): Promise<unknown> => {
+      const tool = tools.get("grill_publish");
+      return tool.execute("call", tool.parameters.parse(params), undefined, undefined, ctx);
+    },
+    urls,
+    event: (name: string, event = {}): Promise<unknown> => events.get(name)(event, ctx),
+    setQueued(value: boolean) { queued = value; },
   };
 }
 
@@ -106,3 +123,107 @@ test("pausing one interview keeps tools active for another open interview", asyn
   await app.command("finish");
   expect(app.active()).toEqual(["read"]);
 });
+
+async function request(url: string, path = "/api/state", body?: unknown) {
+  const address = new URL(url);
+  const response = await fetch(`${address.origin}${path}`, {
+    headers: { "X-Grill-Token": address.hash.slice(1), "Content-Type": "application/json", Origin: address.origin },
+    ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
+  });
+  expect(response.ok).toBe(true);
+  return response.json();
+}
+
+test("resuming an attached error keeps old-tab autosaves on the acknowledged store", async () => {
+  const app = await fixture();
+  await app.command("Recovery");
+  await app.event("before_agent_start", { systemPrompt: [] });
+  await app.publish({ questions });
+  const oldUrl = app.urls.at(-1)!;
+  await app.command("reply q1 Keep context");
+  await app.event("before_agent_start", { systemPrompt: [] });
+  await app.event("agent_end");
+  expect((await request(oldUrl)).status).toBe("error");
+  await app.command("resume Recovery");
+  await app.publish({ handled: 1, replies: [{ q: "q1", text: "Context kept." }] });
+  const current = await request(oldUrl);
+  await request(oldUrl, "/api/drafts", {
+    revision: current.drafts.revision, answers: { q1: { option: "modal" } },
+  });
+  const durable = JSON.parse(readFileSync(join(app.home, current.id, "state.json"), "utf8"));
+  expect(durable.handled).toBe(1);
+  expect(durable.pending).toBeUndefined();
+  expect(durable.questions[0].thread.map((entry: any) => entry.text)).toEqual(["Keep context", "Context kept."]);
+  expect(durable.drafts.answers.q1).toEqual({ option: "modal" });
+});
+
+test("queued interviews retain their own pending batch and detect an unpublished turn", async () => {
+  const app = await fixture();
+  await app.command("First");
+  await app.publish({ questions });
+  const firstUrl = app.urls.at(-1)!;
+  await app.command("reply q1 First question");
+  app.setQueued(true);
+  await app.event("before_agent_start", { systemPrompt: [] });
+  await app.event("agent_end");
+  expect((await request(firstUrl)).status).toBe("working");
+  await app.command("Second");
+  await app.publish({ questions });
+  const secondUrl = app.urls.at(-1)!;
+  await app.command("reply q1 Second question");
+  await app.event("before_agent_start", { systemPrompt: [] });
+  await app.publish({ handled: 1, replies: [{ q: "q1", text: "Second handled." }] });
+  app.setQueued(false);
+  await app.event("agent_end");
+  const first = await request(firstUrl);
+  const second = await request(secondUrl);
+  expect(first.status).toBe("error");
+  expect(first.pending.seq).toBe(1);
+  expect(second.status).toBe("waiting");
+  expect(second.pending).toBeUndefined();
+  expect(second.handled).toBe(1);
+  await app.command(`use ${first.id}`);
+  await app.command("resume");
+  expect((await request(firstUrl)).status).toBe("working");
+});
+
+test("resume skips a finished branch entry and reopens the older paused interview", async () => {
+  const app = await fixture();
+  await app.command("Older");
+  await app.publish({ questions });
+  await app.command("pause");
+  await app.command("Newest");
+  await app.publish({ questions });
+  const newestUrl = app.urls.at(-1)!;
+  const newest = await request(newestUrl);
+  await app.command("finish");
+  await app.command("pause");
+  await app.command("resume");
+  const resumed = await request(app.urls.at(-1)!);
+  expect(resumed.topic).toBe("Older");
+  expect(resumed.status).toBe("waiting");
+  await app.command("reply q1 Reopened");
+  expect((await request(app.urls.at(-1)!)).pending.actions).toEqual([{ type: "thread", q: "q1", text: "Reopened" }]);
+  const finished = JSON.parse(readFileSync(join(app.home, newest.id, "state.json"), "utf8"));
+  expect(finished.status).toBe("finished");
+});
+
+test("browser Finish writes the report and hides command-only tools", async () => {
+  const app = await fixture();
+  await app.command("Browser finish");
+  await app.publish({ questions });
+  const url = app.urls.at(-1)!;
+  const initial = await request(url);
+  await request(url, "/api/send", { actions: [{ type: "finish" }] });
+  expect((await request(url)).status).toBe("finished");
+  expect(readFileSync(join(app.home, initial.id, "report.md"), "utf8")).toContain("Browser finish");
+  expect(app.active()).toEqual(["read"]);
+});
+
+test("unsourced verified facts pass the tool contract and persist", async () => {
+  const app = await fixture();
+  await app.command("Facts");
+  await app.publish({ questions, context: { facts: [{ id: "known", text: "The workflow has two choices." }] } });
+  expect((await request(app.urls.at(-1)!)).context.facts).toEqual([{ id: "known", text: "The workflow has two choices." }]);
+});
+
