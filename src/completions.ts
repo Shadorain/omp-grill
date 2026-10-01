@@ -47,6 +47,9 @@ const CONFIG_KEYS: { name: string; description: string }[] = [
   { name: "host", description: "Listen address for interview servers" },
   { name: "port", description: "Fixed port; 0 uses a free port" },
   { name: "allowAgentStart", description: "Let the agent start interviews" },
+  { name: "discussionModel", description: "Discussion/exploration model: provider/model-id or main" },
+  { name: "diagramModel", description: "Diagram model: provider/model-id or main" },
+  { name: "prototypeModel", description: "Prototype model: provider/model-id or main" },
 ];
 
 const CONFIG_VALUES: Record<string, { name: string; description?: string }[]> = {
@@ -60,6 +63,9 @@ const CONFIG_VALUES: Record<string, { name: string; description?: string }[]> = 
     { name: "true", description: "Agent may start interviews" },
     { name: "false", description: "Only /grill commands start interviews" },
   ],
+  discussionModel: [{ name: "main", description: "Use the session agent" }],
+  diagramModel: [{ name: "main", description: "Use the session agent" }],
+  prototypeModel: [{ name: "main", description: "Use the session agent" }],
 };
 
 function item(value: string, label: string, description?: string): AutocompleteItem {

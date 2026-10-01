@@ -4,13 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z, type ExtensionAPI, type ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import grillExtension from "../src/extension";
+import type { Api, Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
 });
 
-async function fixture(allowAgentStart?: boolean) {
+async function fixture(allowAgentStart?: boolean, modelRegistry?: Pick<ExtensionContext["modelRegistry"], "find" | "resolver" | "resolveModelHeaders">) {
   const home = mkdtempSync(join(tmpdir(), "omp-grill-extension-"));
   const previousHome = process.env.OMP_GRILL_HOME;
   process.env.OMP_GRILL_HOME = home;
@@ -26,6 +28,8 @@ async function fixture(allowAgentStart?: boolean) {
   const urls: string[] = [];
   const notices: string[] = [];
   const messages: any[] = [];
+  const handoffs = new EventTarget();
+
   const pi = {
     zod: z,
     registerTool(tool: any) {
@@ -34,16 +38,24 @@ async function fixture(allowAgentStart?: boolean) {
     },
     registerCommand(_name: string, value: any) { command = value; },
     on(name: string, handler: any) { events.set(name, handler); },
+    registerMessageRenderer(_kind: string, _renderer: unknown) {},
+    registerShortcut(_key: string, _options: unknown) {},
     getActiveTools: () => [...active],
     async setActiveTools(names: string[]) { active = names; },
     appendEntry(customType: string, data: unknown) { entries.push({ type: "custom", customType, data }); },
-    sendMessage(message: unknown) { messages.push(message); },
+    sendMessage(message: unknown) {
+      messages.push(message);
+      if (message && typeof message === "object" && "customType" in message && message.customType === "omp-grill.submission")
+        handoffs.dispatchEvent(new Event("submission"));
+
+    },
     sendUserMessage() {},
   };
   const ctx = {
     cwd: "/demo",
     hasUI: false,
     agent: { kind: "main" },
+    modelRegistry,
     hasPendingMessages: () => queued,
     sessionManager: { getSessionId: () => "test-owner", getBranch: () => entries },
     ui: {
@@ -79,8 +91,160 @@ async function fixture(allowAgentStart?: boolean) {
     messages,
     event: (name: string, event = {}): Promise<unknown> => events.get(name)(event, ctx),
     setQueued(value: boolean) { queued = value; },
+    waitForSubmission: () => new Promise<void>((resolve) => handoffs.addEventListener("submission", () => resolve(), { once: true })),
+
   };
 }
+
+async function specialistProvider(overrides: Record<string, unknown> = {}) {
+  const requests: string[] = [];
+  const patches = {
+    discussion: { replies: [{ q: "q1", text: "A modal preserves the board; a separate page supports deep links." }] },
+    diagram: { diagram: { title: "Task creation", kind: "flow", nodes: [{ id: "board", label: "Board" }, { id: "modal", label: "Task form" }], edges: [{ from: "board", to: "modal", label: "Create" }] }, diagramReply: "Creation stays on the board." },
+    prototype: { prototype: { title: "Task form", start: "board", screens: [{ id: "board", title: "Board", blocks: [{ id: "task-name", kind: "input", label: "Task name" }] }] }, prototypeReply: "Local task form preview." },
+  };
+  const server = Bun.serve({
+    hostname: "127.0.0.1", port: 0,
+    async fetch(req) {
+      const { model } = z.object({ model: z.enum(["discussion", "diagram", "prototype"]) }).parse(await req.json());
+      requests.push(model);
+      const chunk = (delta: unknown, finish_reason: string | null) => `data: ${JSON.stringify({
+        id: "grill-response", object: "chat.completion.chunk", created: 1, model,
+        choices: [{ index: 0, delta, finish_reason }],
+      })}\n\n`;
+      return new Response(
+        chunk({ role: "assistant", tool_calls: [{ index: 0, id: "result", type: "function", function: { name: "grill_result", arguments: JSON.stringify(overrides[model] ?? patches[model]) } }] }, null)
+        + chunk({}, "tool_calls") + "data: [DONE]\n\n",
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
+    },
+  });
+  cleanup.push(async () => { server.stop(true); });
+  const model = (id: string): Model<Api> => buildModel({
+    id, name: id, api: "openai-completions", provider: "grill-local",
+    baseUrl: `http://127.0.0.1:${server.port}/v1`,
+    reasoning: false, input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 32000, maxTokens: 2048,
+  });
+  return {
+    requests,
+    registry: {
+      find: (provider: string, id: string) => provider === "grill-local" && id in patches ? model(id) : undefined,
+      resolver: () => async () => "local-test",
+      resolveModelHeaders: async () => undefined,
+    } satisfies Pick<ExtensionContext["modelRegistry"], "find" | "resolver" | "resolveModelHeaders">,
+  };
+}
+
+test("configured specialist results persist, main owns question followups, and resume does not regenerate completed work", async () => {
+  const provider = await specialistProvider();
+  const app = await fixture(false, provider.registry);
+  await app.command("config discussionModel grill-local/discussion");
+  await app.command("config diagramModel grill-local/diagram");
+  await app.command("config prototypeModel grill-local/prototype");
+  await app.command("Task board");
+  await app.publish({ questions });
+  let url = app.urls.at(-1)!;
+  await app.command("reply q1 Can tasks have deep links?");
+  let state = await request(url);
+  expect(state.questions[0].thread.at(-1).text).toBe("A modal preserves the board; a separate page supports deep links.");
+  expect(state.pending.completed).toEqual(["discussion"]);
+  expect(state.pending.seq).toBe(1);
+  const handoff = JSON.parse(app.messages.at(-1).content);
+  expect(handoff.actions).toEqual([]);
+  expect(handoff.specialistResults.discussion[0].thread.at(-1).text).toBe(state.questions[0].thread.at(-1).text);
+  await app.event("before_agent_start", { systemPrompt: [] });
+  await app.event("agent_end");
+  expect((await request(url)).status).toBe("error");
+  await app.command("pause");
+  await app.command("resume");
+  url = app.urls.at(-1)!;
+  expect(provider.requests).toEqual(["discussion"]);
+  await app.publish({ handled: 1, questions: [{ ...questions[0], id: "q2", title: "Should tasks have stable shareable links?" }] });
+  expect((await request(url)).questions.some((question: { id: string }) => question.id === "q2")).toBe(true);
+  for (const kind of ["diagram", "prototype"] as const) {
+    const delivered = app.waitForSubmission();
+    const response = await request(url, "/api/send", { actions: [{ type: "visualize", kind }] });
+    await delivered;
+    state = await request(url);
+    expect(state[kind].title).toBe(kind === "diagram" ? "Task creation" : "Task form");
+    expect(state.pending.completed).toContain(kind);
+    const compact = JSON.parse(app.messages.at(-1).content);
+    expect(compact.actions).toEqual([]);
+    expect(compact[kind]).toBeUndefined();
+    await app.publish({ handled: response.seq });
+  }
+  expect(provider.requests).toEqual(["discussion", "diagram", "prototype"]);
+  await app.command("config discussionModel main");
+  await app.command("reply q1 What about navigation?");
+  expect(provider.requests).toEqual(["discussion", "diagram", "prototype"]);
+  expect(JSON.parse(app.messages.at(-1).content).actions).toEqual([{ type: "thread", q: "q1", text: "What about navigation?" }]);
+  await app.publish({ handled: 4, replies: [{ q: "q1", text: "Main agent discussion." }] });
+});
+
+test("initial questions restore the private URL at turn end without another model turn", async () => {
+  const app = await fixture();
+  await app.command("Task board");
+  const url = app.urls.at(-1);
+  await app.publish({ questions });
+  await app.event("agent_end");
+  const ready = app.messages.find((message) => message.customType === "omp-grill.ready");
+  expect(ready.details.url).toBe(url);
+  expect((await request(url!)).status).toBe("waiting");
+});
+
+test("specialists cannot change questions and invalid output retains a retryable unacknowledged batch", async () => {
+  const overrides: Record<string, unknown> = {
+    discussion: { replies: [{ q: "q1", text: "Untrusted change" }], questions: [{ ...questions[0], title: "Unauthorized question" }] },
+  };
+  const provider = await specialistProvider(overrides);
+  const app = await fixture(false, provider.registry);
+  await app.command("config discussionModel grill-local/discussion");
+  await app.command("Task board");
+  await app.publish({ questions });
+  const url = app.urls.at(-1)!;
+  await app.command("reply q1 Preserve the interview");
+  const failed = await request(url);
+  expect(failed.status).toBe("error");
+  expect(failed.pending.seq).toBe(1);
+  expect(failed.pending.completed).toBeUndefined();
+  expect(failed.questions[0].title).toBe(questions[0].title);
+  expect(failed.questions[0].thread.map((entry: { role: string }) => entry.role)).toEqual(["user"]);
+  delete overrides.discussion;
+  await app.command("resume");
+  expect((await request(url)).pending.completed).toEqual(["discussion"]);
+  await app.publish({ handled: 1 });
+  expect((await request(url)).pending).toBeUndefined();
+});
+
+test("persisted specialist completion must match pending actions and unknown explored options fail", async () => {
+  const provider = await specialistProvider({
+    discussion: { explorations: [{ q: "q1", rows: [
+      { option: "modal", pros: ["Fast"], cons: ["Small"] },
+      { option: "page", pros: ["Deep links"], cons: ["Navigation"] },
+      { option: "fake", pros: ["No"], cons: ["No"] },
+    ] }] },
+  });
+  const app = await fixture(false, provider.registry);
+  await app.command("config discussionModel grill-local/discussion");
+  await app.command("Task board");
+  await app.publish({ questions });
+  const url = app.urls.at(-1)!;
+  const response = await request(url, "/api/send", { actions: [{ type: "explore", q: "q1" }] });
+  expect(response.seq).toBe(1);
+  let failed = await request(url);
+  for (let i = 0; i < 100 && failed.status !== "error"; i += 1) {
+    await Bun.sleep(20);
+    failed = await request(url);
+  }
+
+  expect(failed.status).toBe("error");
+  expect(failed.error).toContain("unknown option");
+  expect(failed.pending.completed).toBeUndefined();
+
+
+});
 
 const questions = [{
   id: "q1", title: "Where should tasks be created?",
@@ -137,6 +301,27 @@ async function request(url: string, path = "/api/state", body?: unknown) {
   expect(response.ok).toBe(true);
   return response.json();
 }
+
+test("startup publishes once without an acknowledgement; submissions require their exact positive sequence", async () => {
+  const app = await fixture();
+  await app.command("Task board");
+  const url = app.urls.at(-1)!;
+  const initial = await request(url);
+  for (const handled of [0, -1, 0.5]) {
+    expect(() => app.publish({ id: initial.id, handled, questions })).toThrow();
+  }
+  expect((await request(url)).questions).toEqual([]);
+  await app.publish({ id: initial.id, questions });
+  expect((await request(url)).status).toBe("waiting");
+  await app.command("reply q1 Keep the board visible");
+  await expect(app.publish({ id: initial.id, handled: 2, replies: [{ q: "q1", text: "Wrong batch" }] })).rejects.toThrow();
+  expect((await request(url)).pending.seq).toBe(1);
+  await app.publish({ id: initial.id, handled: 1, replies: [{ q: "q1", text: "Agreed." }] });
+  const state = await request(url);
+  expect(state.pending).toBeUndefined();
+  expect(state.handled).toBe(1);
+  expect(state.questions[0].thread.map((entry: { text: string }) => entry.text)).toEqual(["Keep the board visible", "Agreed."]);
+});
 
 test("resuming an attached error keeps old-tab autosaves on the acknowledged store", async () => {
   const app = await fixture();

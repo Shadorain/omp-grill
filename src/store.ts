@@ -14,6 +14,7 @@ import type {
   Publish,
   Question,
   QuestionInput,
+  SpecialistRole,
   Store,
   Submission,
 } from "./types";
@@ -21,6 +22,8 @@ import { renderDiagram } from "./diagram";
 import { type ExportFile, type ExportKind, renderAdrs, renderBeadsPlan } from "./exports";
 import { renderPrototype, validatePrototypeSpec } from "./prototype";
 import { workspaceRoot } from "./workspace";
+import { actionRole } from "./messages";
+const SPECIALIST_ROLE_IDS = ["discussion", "diagram", "prototype"] as const;
 
 const MAX_ACTIONS = 100;
 const MAX_TEXT = 20_000;
@@ -462,7 +465,11 @@ export function compactSubmission(
   state: GrillState,
   submission: Submission,
 ): string {
-  const actions = submission.actions;
+  const completed = submission.completed ?? [];
+  const actions = submission.actions.filter((action) => {
+    const role = actionRole(action);
+    return !role || !completed.includes(role);
+  });
   const relevant = new Set(
     actions.flatMap((action) => ("q" in action ? [action.q] : [])),
   );
@@ -502,11 +509,33 @@ export function compactSubmission(
     project: state.project,
     topic: state.topic,
     note: state.note,
-    context: contextBrief(state),
+    context: wantsVisual ? undefined : wantsThread
+      ? { intent: state.context.intent, terms: state.context.terms.slice(-20), facts: state.context.facts.slice(-20), risks: state.context.risks.slice(-20) }
+      : contextBrief(state),
     actions,
     questions,
+    ...(completed.length ? {
+      specialistResults: {
+        instruction: "These requests are already fulfilled. Do not repeat replies or regenerate visuals. Publish only the next consequential questions and acknowledge this seq.",
+        discussion: completed.includes("discussion") ? state.questions
+          .filter((question) => submission.actions.some((action) => actionRole(action) === "discussion" && "q" in action && action.q === question.id))
+          .map((question) => ({ id: question.id, thread: question.thread.slice(-2), explore: question.explore })) : undefined,
+        diagram: completed.includes("diagram") && state.diagram ? { title: state.diagram.title, reply: state.diagram.thread.at(-1)?.text } : undefined,
+        prototype: completed.includes("prototype") && state.prototype ? { title: state.prototype.title, reply: state.prototype.thread.at(-1)?.text } : undefined,
+      },
+    } : {}),
     ...(wantsVisual
       ? {
+          visualContext: {
+            intent: state.context.intent,
+            terms: state.context.terms.slice(-20),
+            facts: state.context.facts.slice(-20),
+            risks: state.context.risks.slice(-20),
+            assumptions: state.questions.filter((question) => question.status !== "answered")
+              .map((question) => ({ id: question.id, title: question.title, recommendation: question.recommendation, options: question.options, status: question.status })),
+            decisions: state.questions.filter((question) => question.status === "answered" && question.answer)
+              .map((question) => ({ id: question.id, title: question.title, answer: question.answer })),
+          },
           ...(wantsDiagram ? { diagram: state.diagram && {
             title: state.diagram.title,
             kind: state.diagram.kind,
@@ -526,24 +555,6 @@ export function compactSubmission(
               version: state.prototype.version,
               stale: state.prototype.stale,
               thread: state.prototype.thread.slice(-6),
-            },
-            prototypeContext: {
-              intent: state.context.intent,
-              terms: state.context.terms.slice(-20),
-              facts: state.context.facts.slice(-20),
-              risks: state.context.risks.slice(-20),
-              assumptions: state.questions
-                .filter((q) => q.status !== "answered")
-                .map((q) => ({
-                  id: q.id,
-                  title: q.title,
-                  recommendation: q.recommendation,
-                  options: q.options,
-                  status: q.status,
-                })),
-              decisions: state.questions
-                .filter((q) => q.status === "answered" && q.answer)
-                .map((q) => ({ id: q.id, title: q.title, answer: q.answer })),
             },
           } : {}),
         }
@@ -578,7 +589,12 @@ export function compactState(state: GrillState): string {
     context: contextBrief(state),
     pending: state.pending && {
       seq: state.pending.seq,
-      actions: state.pending.actions,
+      completed: state.pending.completed,
+      actions: state.pending.actions.filter((action) => {
+        const role = actionRole(action);
+        return !role || !state.pending?.completed?.includes(role);
+      }),
+      ...(state.pending.completed?.length ? { instruction: "Specialist roles in completed have already published their results. Do not repeat them; only publish next questions and acknowledge seq." } : {}),
     },
     questions,
   });
@@ -777,6 +793,22 @@ function buildStore(dir: string, state: GrillState): Store {
       )
         fail("Publish accepts at most three valid questions");
       const next = clone(state);
+      if (patch.specialist !== undefined) {
+        const specialist = patch.specialist;
+        if (!isRecord(specialist)) fail("Invalid specialist result");
+        const role = specialist.role;
+        if (
+          !Number.isSafeInteger(specialist.seq) ||
+          typeof role !== "string" ||
+          !(SPECIALIST_ROLE_IDS as readonly string[]).includes(role) ||
+          !next.pending ||
+          next.pending.seq !== specialist.seq
+        )
+          fail("Specialist result does not match pending submission");
+        if (!next.pending.actions.some((action) => actionRole(action) === role)) fail(`No ${role} action in pending submission`);
+        if (next.pending.completed?.includes(role as SpecialistRole)) fail("Specialist result already published");
+        next.pending.completed = [...(next.pending.completed ?? []), role as SpecialistRole];
+      }
       if (patch.handled !== undefined) {
         if (
           !Number.isSafeInteger(patch.handled) ||
@@ -1154,6 +1186,15 @@ export function loadStore(dir: string, owner: string): Store {
     if (pendingSeq !== state.seq || pendingSeq <= state.handled)
       fail("Invalid pending submission");
     state.pending = { seq: pendingSeq, actions, ...(typeof pending.requestId === "string" ? { requestId: pending.requestId } : {}) };
+    if (pending.completed !== undefined) {
+      if (!Array.isArray(pending.completed) || !pending.completed.every((role) => role === "discussion" || role === "diagram" || role === "prototype"))
+        fail("Invalid completed specialists");
+      for (const role of pending.completed) {
+        if (!actions.some((action) => actionRole(action) === role))
+          fail("Completed specialist has no matching pending action");
+      }
+      state.pending.completed = pending.completed;
+    }
   }
   if (value.diagram !== undefined) state.diagram = parseDiagram(value.diagram);
   if (value.prototype !== undefined) state.prototype = parsePrototype(value.prototype);

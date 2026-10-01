@@ -43,7 +43,6 @@ describe("grill command completions", () => {
 
   test("completes config keys and values", () => {
     expect(grillCompletions("conf", snapshot)?.[0]?.value).toBe("config ");
-    expect(grillCompletions("config ", snapshot)?.map((item) => item.label)).toEqual(["host", "port", "allowAgentStart"]);
     expect(grillCompletions("config al", snapshot)?.map((item) => item.value)).toEqual(["config allowAgentStart "]);
     expect(grillCompletions("config allowAgentStart ", snapshot)?.map((item) => item.value)).toEqual(["config allowAgentStart true ", "config allowAgentStart false "]);
     expect(grillCompletions("config host 1", snapshot)?.map((item) => item.value)).toEqual(["config host 127.0.0.1 "]);

@@ -7,6 +7,9 @@ export interface ServerSettings {
   host: string;
   port: number;
   allowAgentStart: boolean;
+  discussionModel?: string;
+  diagramModel?: string;
+  prototypeModel?: string;
 }
 
 export const DEFAULT_SETTINGS: ServerSettings = {
@@ -69,7 +72,15 @@ export function validateServerSettings(
     return fail("port must be 0 or an integer from 1 to 65535");
   if (typeof allowAgentStart !== "boolean")
     return fail("allowAgentStart must be a boolean");
-  return { host, port, allowAgentStart };
+  const models: Pick<ServerSettings, "discussionModel" | "diagramModel" | "prototypeModel"> = {};
+  for (const key of ["discussionModel", "diagramModel", "prototypeModel"] as const) {
+    const selector = value[key];
+    if (selector === undefined || selector === "main") continue;
+    if (typeof selector !== "string" || !/^[^\s/]+\/\S+$/.test(selector))
+      return fail(`${key} must be provider/model-id or main`);
+    models[key] = selector;
+  }
+  return { host, port, allowAgentStart, ...models };
 }
 
 export async function readServerSettings(
@@ -117,5 +128,8 @@ export function formatServerSettings(
     `  host: ${settings.host}`,
     `  port: ${settings.port}`,
     `  allowAgentStart: ${settings.allowAgentStart}`,
+    `  discussionModel: ${settings.discussionModel ?? "main"}`,
+    `  diagramModel: ${settings.diagramModel ?? "main"}`,
+    `  prototypeModel: ${settings.prototypeModel ?? "main"}`,
   ].join("\n");
 }

@@ -101,10 +101,12 @@ export type Action =
   | { type: "visualize"; kind?: "diagram" | "prototype" }
   | { type: "visual-feedback"; kind?: "diagram" | "prototype"; text: string }
   | { type: "finish" };
+export type SpecialistRole = "discussion" | "diagram" | "prototype";
 export interface Submission {
   seq: number;
   actions: Action[];
   requestId?: string;
+  completed?: SpecialistRole[];
 }
 export interface GrillState {
   id: string;
@@ -142,6 +144,7 @@ export interface Publish {
   diagramReply?: string;
   prototype?: PrototypeSpec;
   prototypeReply?: string;
+  specialist?: { seq: number; role: SpecialistRole };
 }
 export interface Store {
   claim(): void;

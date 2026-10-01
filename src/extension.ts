@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
  import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { Text } from "@oh-my-pi/pi-tui";
  import { grillCompletions } from "./completions.ts";
  import {
    createStore,
@@ -11,8 +12,8 @@ import { join } from "node:path";
  } from "./store.ts";
  import { startServer } from "./server.ts";
  import { listSessions, resumeStore } from "./sessions.ts";
- import { createGrillInspector, createGrillWidget, type GrillTheme } from "./tui.ts";
- import type { Action, GrillServer, InterviewContext, Publish, SessionSummary, Store } from "./types.ts";
+ import { createGrillInspector, createGrillWidget, grillWidgetTitle, type GrillTheme } from "./tui.ts";
+ import type { Action, GrillServer, InterviewContext, Publish, SessionSummary, Store, Submission } from "./types.ts";
 import {
   displaySettingsPath,
   formatServerSettings,
@@ -20,6 +21,9 @@ import {
   validateServerSettings,
   writeServerSettings,
 } from "./settings.ts";
+import { createPublishSchemas } from "./publish-schema";
+import { runSpecialist } from "./models";
+import { actionRole, submissionSummary } from "./messages";
 import { type ExportKind, EXPORT_DEFAULTS, EXPORT_KINDS } from "./exports.ts";
 function grillHome() {
   return process.env.OMP_GRILL_HOME || join(homedir(), ".omp", "grill");
@@ -40,41 +44,20 @@ For unresolved choices, draw from the recommendation and label the result assume
 
 export default function grillExtension(pi: ExtensionAPI) {
   const z = pi.zod;
-  const prototypeFields = {
-    id: z.string(),
-    kind: z.enum(["heading", "text", "button", "input", "select", "checkbox", "table", "list", "card", "dialog"]),
-    label: z.string().optional(),
-    text: z.string().optional(),
-    value: z.string().optional(),
-    options: z.array(z.string()).optional(),
-    columns: z.array(z.string()).optional(),
-    rows: z.array(z.array(z.string())).optional(),
-    action: z.object({
-      type: z.enum(["navigate", "set", "toggle", "open", "close", "submit"]),
-      target: z.string(),
-      value: z.string().optional(),
-    }).optional(),
-  };
-  const prototypeLeaf = z.object(prototypeFields);
-  const prototypeGroup = z.object({
-    ...prototypeFields,
-    children: z.array(prototypeLeaf).optional(),
-  });
-  const prototypeBlock = z.object({
-    ...prototypeFields,
-    children: z.array(prototypeGroup).optional(),
-  });
+  const schemas = createPublishSchemas(z);
   type Runtime = {
     store: Store;
     owner: string;
     server?: GrillServer;
     ctx: ExtensionContext;
+    specialist?: AbortController;
+    showReadyUrl?: boolean;
   };
   const attached = new Map<string, Runtime>();
    let currentId: string | undefined;
    const runningBatches = new Map<string, number>();
    let projectDir = process.cwd();
-   let tuiMode = false;
+   let expanded = false;
    let overlayTui: { requestRender(): void } | undefined;
   let allowAgentStart = false;
 
@@ -135,6 +118,7 @@ export default function grillExtension(pi: ExtensionAPI) {
   async function closeOne(id: string, pause: boolean) {
     const runtime = attached.get(id);
     if (!runtime) return;
+    runtime.specialist?.abort();
     attached.delete(id);
     if (currentId === id) currentId = attached.keys().next().value;
     runningBatches.delete(id);
@@ -144,7 +128,6 @@ export default function grillExtension(pi: ExtensionAPI) {
     await syncTools();
     if (attached.size) status();
     else {
-      tuiMode = false;
       runtime.ctx.ui.setWidget("omp-grill", undefined);
       runtime.ctx.ui.setStatus("omp-grill", undefined);
     }
@@ -158,14 +141,7 @@ export default function grillExtension(pi: ExtensionAPI) {
     if (!runtime) return;
     const { store, ctx } = runtime;
     void syncTools().catch((error) => ctx.ui.notify(String(error), "error"));
-    const answered = store.state.questions.filter(
-      (q) => q.status === "answered",
-    ).length;
-    const prefix = attached.size > 1 ? `grills ${attached.size} · ` : "grill ";
-    ctx.ui.setStatus(
-      "omp-grill",
-      `${prefix}${store.state.topic} · ${answered}/${store.state.questions.length} · ${store.state.status}`,
-    );
+    ctx.ui.setStatus("omp-grill", undefined);
     syncWidget(ctx);
   }
   async function serve(runtime: Runtime) {
@@ -183,7 +159,7 @@ export default function grillExtension(pi: ExtensionAPI) {
           throw new Error(
             "Grill detached from its OMP session. Resume it from that session.",
           );
-        wake(runtime, submission);
+        return wake(runtime, submission);
       },
     });
     status();
@@ -191,7 +167,7 @@ export default function grillExtension(pi: ExtensionAPI) {
   }
   function notifyUrl(ctx: ExtensionContext, url: string, runtime?: Runtime) {
     const name = runtime
-      ? `${runtime.store.state.topic} · ${runtime.store.state.id.slice(0, 8)}\n`
+      ? `${grillWidgetTitle(runtime.store.state)} · ${runtime.store.state.id.slice(0, 8)}\n`
       : "";
     ctx.ui.notify(
       `Grill ${name}${url}\nKeep the full URL private. HTTP is unencrypted; use a trusted network or SSH tunnel.`,
@@ -224,8 +200,8 @@ export default function grillExtension(pi: ExtensionAPI) {
     pi.sendMessage(
       {
         customType: "omp-grill.start",
-        content: `Start grill ${runtime.store.state.id} for ${JSON.stringify(runtime.store.state.topic)}. Call grill_publish with the first frontier and that id. Other open grills stay open.`,
-        display: true,
+        content: `Start grill ${runtime.store.state.id} for ${JSON.stringify(runtime.store.state.topic)}. Publish the first frontier with that id; omit topic and handled (no pending submission). Then end the turn without repeating the questions in chat.`,
+        display: false,
         attribution: "agent",
       },
       { triggerTurn: true, deliverAs: "followUp" },
@@ -261,13 +237,17 @@ export default function grillExtension(pi: ExtensionAPI) {
   }
   function syncWidget(ctx: ExtensionContext) {
     if (!ctx.hasUI) return;
-    if (!tuiMode || !runtimeOf(currentId)) {
+    if (!runtimeOf(currentId) || runtimeOf(currentId)?.store.state.status === "finished") {
       ctx.ui.setWidget("omp-grill", undefined);
       return;
     }
     ctx.ui.setWidget(
       "omp-grill",
-      (_tui, theme) => createGrillWidget(() => runtimeOf(currentId)?.store.state, theme as GrillTheme),
+      (_tui, theme) => createGrillWidget(
+        () => runtimeOf(currentId)?.store.state,
+        theme as GrillTheme,
+        () => ({ expanded, url: runtimeOf(currentId)?.server?.url }),
+      ),
       { placement: "aboveEditor" },
     );
   }
@@ -321,18 +301,56 @@ export default function grillExtension(pi: ExtensionAPI) {
     }
     return actions;
   }
-  function wake(runtime: Runtime, submission: { seq: number; actions: Action[] }) {
-    select(runtime);
-    runningBatches.set(runtime.store.state.id, submission.seq);
-    pi.sendUserMessage(compactSubmission(runtime.store.state, submission), {
-      deliverAs: "followUp",
-    });
-    status();
+  async function wake(runtime: Runtime, submission: Submission) {
+    if (runtime.specialist) return;
+    const controller = new AbortController();
+    runtime.specialist = controller;
+    try {
+      select(runtime);
+      status();
+      const settings = await readServerSettings(grillHome());
+
+      for (const role of ["discussion", "diagram", "prototype"] as const) {
+        const selector = settings[`${role}Model`];
+        if (!selector || runtime.store.state.pending?.completed?.includes(role) || !submission.actions.some((action) => actionRole(action) === role)) continue;
+        const patch = await runSpecialist({
+          ctx: runtime.ctx, selector, role, state: runtime.store.state, submission,
+          parameters: schemas.specialists[role], signal: controller.signal, instruction,
+        });
+        if (controller.signal.aborted || !attached.has(runtime.store.state.id)) return;
+        if (runtime.store.state.pending?.seq !== submission.seq) return;
+        runtime.store.publish({ ...patch, specialist: { seq: submission.seq, role } });
+        status();
+      }
+      if (controller.signal.aborted || !attached.has(runtime.store.state.id)) return;
+      const pending = runtime.store.state.pending;
+      if (!pending || pending.seq !== submission.seq) return;
+      runningBatches.set(runtime.store.state.id, submission.seq);
+      pi.sendMessage({
+        customType: "omp-grill.submission",
+        content: compactSubmission(runtime.store.state, pending),
+        details: { summary: submissionSummary(runtime.store.state, pending) },
+        display: true,
+        attribution: "user",
+      }, { triggerTurn: true, deliverAs: "followUp" });
+    } catch (error) {
+      if (
+        !controller.signal.aborted &&
+        attached.has(runtime.store.state.id) &&
+        runtime.store.state.pending?.seq === submission.seq
+      ) {
+        runtime.store.setStatus("error", String(error));
+        runtime.ctx.ui.notify(`Grill: ${String(error)}. Saved batch retained; /grill resume retries it.`, "error");
+      }
+    } finally {
+      if (runtime.specialist === controller) runtime.specialist = undefined;
+      status();
+    }
   }
   function sendDrafts(runtime: Runtime) {
     const actions = draftActions(runtime);
     if (!actions.length) return false;
-    wake(runtime, runtime.store.submit(actions, { draftRevision: runtime.store.state.drafts.revision }));
+    void wake(runtime, runtime.store.submit(actions, { draftRevision: runtime.store.state.drafts.revision }));
     return true;
   }
   function finishRuntime(runtime: Runtime) {
@@ -361,17 +379,22 @@ export default function grillExtension(pi: ExtensionAPI) {
     const parts = rest.split(/\s+/);
     const [key, value] = parts;
     const usage =
-      "Usage: /grill config [host <address>] | [port <0-65535>] | [allowAgentStart true|false]";
-    if (parts.length !== 2 || !key || !value || !["host", "port", "allowAgentStart"].includes(key))
+      "Usage: /grill config <host|port|allowAgentStart|discussionModel|diagramModel|prototypeModel> <value>; models use provider/model-id or main";
+    if (parts.length !== 2 || !key || !value || !["host", "port", "allowAgentStart", "discussionModel", "diagramModel", "prototypeModel"].includes(key))
       throw new Error(usage);
     const current = await readServerSettings(home);
     const candidate: Record<string, unknown> = { ...current };
     if (key === "host") candidate.host = value;
     else if (key === "port") candidate.port = Number(value);
-    else
-      candidate.allowAgentStart =
-        value === "true" ? true : value === "false" ? false : value;
+    else if (key === "allowAgentStart")
+      candidate.allowAgentStart = value === "true" ? true : value === "false" ? false : value;
+    else candidate[key] = value;
     const next = validateServerSettings(candidate, where);
+    if (key.endsWith("Model") && value !== "main") {
+      const slash = value.indexOf("/");
+      if (!ctx.modelRegistry.find(value.slice(0, slash), value.slice(slash + 1)))
+        throw new Error(`Unknown Grill model: ${value}`);
+    }
     await writeServerSettings(home, next);
     if (key === "allowAgentStart") {
       allowAgentStart = next.allowAgentStart;
@@ -381,12 +404,11 @@ export default function grillExtension(pi: ExtensionAPI) {
       key === "host" || key === "port"
         ? ". Applies when a server next starts; /grill pause then /grill resume restarts it"
         : "";
-    ctx.ui.notify(`Grill configuration set at ${where}: ${key} ${next[key as "host" | "port" | "allowAgentStart"]}${applies}`, "info");
+    ctx.ui.notify(`Grill configuration set at ${where}: ${key} ${candidate[key]}${applies}`, "info");
   }
   async function openTui(ctx: ExtensionContext) {
     if (!ctx.hasUI) throw new Error("Session TUI needs the interactive terminal.");
     owned(ctx);
-    tuiMode = true;
     syncWidget(ctx);
     await ctx.ui.custom((tui, theme, keys, done) => {
       overlayTui = tui;
@@ -498,7 +520,7 @@ export default function grillExtension(pi: ExtensionAPI) {
                 : { option: answer[2], ...(answer[3] ? { text: answer[3] } : {}) }),
             }])
           : runtime.store.submit([{ type: "thread", q: reply![1], text: reply![2] }]);
-        wake(runtime, submission);
+        await wake(runtime, submission);
         ctx.ui.notify(`Submitted ${answer ? "answer" : "message"} to the agent. Continue in the browser or terminal.`, "info");
         return;
       }
@@ -684,7 +706,7 @@ export default function grillExtension(pi: ExtensionAPI) {
         await syncTools();
         notifyUrl(ctx, url, picked);
         if (picked.store.state.pending)
-          wake(picked, picked.store.state.pending);
+          await wake(picked, picked.store.state.pending);
         else if (!picked.store.state.questions.length) {
           picked.store.setStatus("working");
           startTurn(picked);
@@ -695,7 +717,7 @@ export default function grillExtension(pi: ExtensionAPI) {
       if (command === "tui" || command.startsWith("tui ")) {
         const topic = command === "tui" ? "" : command.slice(4).trim();
         if (topic === "off") {
-          tuiMode = false;
+          expanded = false;
           syncWidget(ctx);
           ctx.ui.notify("Session interview closed. The grill stays open.", "info");
           return;
@@ -739,125 +761,22 @@ export default function grillExtension(pi: ExtensionAPI) {
     defaultInactive: true,
     label: "Grill questions",
     description:
-      "Start another interview with topic and 1-3 questions, or publish to the grill named by id. Several grills may be open. Acknowledge browser batches with handled. Never generate UI files.",
+      "Publish compact questions/replies, then end the turn without a chat recap. Use id for an existing grill; topic only starts a new interview. Omit handled at startup; otherwise copy the pending submission's positive seq. Use grill_state only after context loss. Never generate UI files.",
     approval: "write",
-    parameters: z.object({
-      topic: z.string().optional(),
-      id: z.string().optional(),
-      handled: z.number().optional(),
-      questions: z
-        .array(
-          z.object({
-            id: z.string(),
-            title: z.string(),
-            body: z.string().optional(),
-            options: z.array(z.object({ id: z.string(), label: z.string() })),
-            recommendation: z.object({
-              option: z.string().optional(),
-              reason: z.string(),
-            }),
-            dependsOn: z.array(z.string()).optional(),
-            durable: z.boolean().optional(),
-          }),
-        )
-        .optional(),
-      replies: z
-        .array(z.object({ q: z.string(), text: z.string() }))
-        .optional(),
-      explorations: z
-        .array(
-          z.object({
-            q: z.string(),
-            rows: z.array(
-              z.object({
-                option: z.string(),
-                pros: z.array(z.string()),
-                cons: z.array(z.string()),
-              }),
-            ),
-          }),
-        )
-        .optional(),
-      note: z.string().optional(),
-      context: z
-        .object({
-          intent: z.string().optional(),
-          docPath: z.string().optional(),
-          terms: z
-            .array(
-              z.object({
-                term: z.string(),
-                definition: z.string(),
-                avoid: z.array(z.string()).optional(),
-              }),
-            )
-            .optional(),
-          facts: z
-            .array(
-              z.object({
-                id: z.string(),
-                text: z.string(),
-                source: z.string().optional(),
-              }),
-            )
-            .optional(),
-          risks: z
-            .array(
-              z.object({
-                id: z.string(),
-                text: z.string(),
-                mitigation: z.string().optional(),
-              }),
-            )
-            .optional(),
-        })
-        .optional(),
-      diagram: z
-        .object({
-          title: z.string(),
-          kind: z.enum(["architecture", "flow", "sequence", "state"]),
-          nodes: z.array(
-            z.object({
-              id: z.string(),
-              label: z.string(),
-              detail: z.string().optional(),
-            }),
-          ),
-          edges: z.array(
-            z.object({
-              from: z.string(),
-              to: z.string(),
-              label: z.string().optional(),
-            }),
-          ),
-        })
-        .optional(),
-      diagramReply: z.string().optional(),
-      prototype: z.object({
-        title: z.string(),
-        start: z.string(),
-        app: z.object({
-          name: z.string(),
-          route: z.string().optional(),
-          chrome: z.array(z.string()).optional(),
-        }).optional(),
-        theme: z.object({
-          background: z.string().optional(),
-          surface: z.string().optional(),
-          text: z.string().optional(),
-          accent: z.string().optional(),
-          radius: z.number().optional(),
-          font: z.enum(["sans", "serif", "mono"]).optional(),
-        }).optional(),
-        screens: z.array(z.object({
-          id: z.string(),
-          title: z.string(),
-          layout: z.enum(["dashboard", "split", "form", "content"]).optional(),
-          blocks: z.array(prototypeBlock),
-        })),
-      }).optional(),
-      prototypeReply: z.string().optional(),
-    }),
+    parameters: schemas.publish,
+    renderCall(params, options) {
+      if (options.expanded) return new Text(JSON.stringify(params, null, 2), 0, 0);
+      const patch = params as Publish & { id?: string };
+      const parts = [
+        patch.questions?.length ? `${patch.questions.length} questions` : "",
+        patch.replies?.length ? `${patch.replies.length} replies` : "",
+        patch.explorations?.length ? `${patch.explorations.length} explorations` : "",
+        patch.diagram ? "diagram" : "",
+        patch.prototype ? "prototype" : "",
+        patch.handled !== undefined ? `ack ${patch.handled}` : "",
+      ].filter(Boolean);
+      return new Text(`Grill · ${parts.join(" · ") || "update"}${patch.id ? ` · ${patch.id.slice(0, 8)}` : ""}`, 0, 0);
+    },
     async execute(_id, params, _signal, _onUpdate, ctx) {
       // OMP validates the injected schema, whose compatibility types infer unknown.
       const { topic, id, ...patch } = params as Publish & { topic?: string; id?: string };
@@ -883,7 +802,9 @@ export default function grillExtension(pi: ExtensionAPI) {
         }
       }
       const { store } = owned(ctx);
+      const firstPublish = store.state.questions.length === 0;
       store.publish(patch);
+      if (firstPublish && store.state.questions.length) owned(ctx).showReadyUrl = true;
       status();
       return {
         content: [
@@ -891,7 +812,7 @@ export default function grillExtension(pi: ExtensionAPI) {
             type: "text",
             text: JSON.stringify({
               published: patch.questions?.length || 0,
-              handled: store.state.handled,
+              ...(patch.handled !== undefined ? { handled: store.state.handled } : {}),
               open: store.state.questions
                 .filter((q) => q.status === "open")
                 .map((q) => q.id),
@@ -918,6 +839,20 @@ export default function grillExtension(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerMessageRenderer<{ summary: string }>("omp-grill.submission", (message, options, theme) =>
+    new Text(options.expanded
+      ? (typeof message.content === "string" ? message.content : JSON.stringify(message.content, null, 2))
+      : theme.fg("accent", message.details?.summary ?? "Grill submission"), 0, 0));
+  pi.registerMessageRenderer<{ title: string; url: string }>("omp-grill.ready", (message, _options, theme) =>
+    new Text(`${theme.fg("success", `Grill ready · ${message.details?.title ?? ""}`)}\n${message.details?.url ?? ""}`, 0, 0));
+  pi.registerShortcut("ctrl+alt+g", {
+    description: "Expand Grill status and private URL",
+    handler(ctx) {
+      if (ctx.agent.kind === "sub" || !runtimeOf(currentId)) return;
+      expanded = !expanded;
+      syncWidget(ctx);
+    },
+  });
   pi.on("session_start", async () => {
     ({ allowAgentStart } = await readServerSettings(grillHome()));
     await syncTools();
@@ -927,7 +862,7 @@ export default function grillExtension(pi: ExtensionAPI) {
     if (ctx.agent.kind === "sub") return;
     let working = false;
     for (const runtime of attached.values()) {
-      if (runtime.owner === ctx.sessionManager.getSessionId() && runtime.store.state.status === "working") {
+      if (!runtime.specialist && runtime.owner === ctx.sessionManager.getSessionId() && runtime.store.state.status === "working") {
         runningBatches.set(runtime.store.state.id, runtime.store.state.pending?.seq ?? 0);
         working = true;
       }
@@ -940,12 +875,24 @@ export default function grillExtension(pi: ExtensionAPI) {
     for (const [id, seq] of runningBatches) {
       const runtime = attached.get(id);
       if (!runtime || runtime.owner !== ctx.sessionManager.getSessionId()) continue;
+      if (runtime.specialist) continue;
       if (runtime.store.state.status === "working" && (runtime.store.state.pending?.seq ?? 0) === seq)
         runtime.store.setStatus(
           "error",
           "Agent stopped without publishing. Use /grill resume to retry the saved batch.",
         );
       runningBatches.delete(id);
+    }
+    for (const runtime of attached.values()) {
+      if (!runtime.showReadyUrl || !runtime.server || runtime.owner !== ctx.sessionManager.getSessionId()) continue;
+      runtime.showReadyUrl = false;
+      pi.sendMessage({
+        customType: "omp-grill.ready",
+        content: "Grill questions are ready.",
+        details: { title: grillWidgetTitle(runtime.store.state), url: runtime.server.url },
+        display: true,
+      }, { triggerTurn: false, deliverAs: "aside" });
+      notifyUrl(ctx, runtime.server.url, runtime);
     }
     status();
   });

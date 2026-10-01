@@ -112,6 +112,16 @@ describe("durable grill store", () => {
     ]);
   });
 
+  test("rejects persisted specialist completion without a matching pending action", () => {
+    const { store } = fixture();
+    store.submit([{ type: "thread", q: "q1", text: "Only discussion here" }]);
+    const file = join(store.dir, "state.json");
+    const saved = JSON.parse(readFileSync(file, "utf8"));
+    saved.pending.completed = ["diagram"];
+    writeFileSync(file, JSON.stringify(saved));
+    expect(() => loadStore(store.dir, "alice")).toThrow("Completed specialist has no matching pending action");
+  });
+
   test("retains discussion and reports decisions, rejected options, and deferrals on finish", () => {
     const { store } = fixture();
     store.publish({
