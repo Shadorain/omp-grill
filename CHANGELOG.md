@@ -34,6 +34,7 @@
 - Interpolate prototype form labels and update dependent displays in place, preserving focus and caret. Synchronize values after actions, reject cross-screen dialog actions, and reject select values outside the declared options.
 - Render diagram self-loops and sequence self-messages. Space sequence actors without overlap and scroll wide diagrams instead of shrinking their labels.
 - Fix the scripted demo's URL capture so `DEMO_URL` prints the current interview's private link.
+- Add `/grill config` to show `settings.json` in the session and set `host`, `port`, or `allowAgentStart` with autocompleted keys and values. `allowAgentStart` changes apply immediately; `host` and `port` apply the next time a server starts.
 
 ## 1.0.0
 

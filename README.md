@@ -43,6 +43,7 @@ You can keep several interviews open. Use `/grill use <id>` to select the one th
 | `/grill history` | View a finished interview. |
 | `/grill sessions` | List saved interviews for this project. |
 | `/grill finish` | Finish the interview and save its report. |
+| `/grill config` | Show settings; `/grill config <key> <value>` sets one. Keys and values autocomplete. |
 
 Run `/grill` to list open interviews and commands. Tab completion suggests commands, interview IDs, questions, and options.
 
@@ -68,7 +69,15 @@ Starting with `/grill tui <topic>` also wakes the agent to publish the first que
 
 ## Configuration
 
-Create `~/.omp/grill/settings.json` to override the defaults:
+Run `/grill config` in the session to show the current settings. Set a value with `/grill config <key> <value>` (tab completion suggests keys and values). Settings live in `settings.json`, which the command creates:
+
+```text
+/grill config host 127.0.0.1
+/grill config port 43127
+/grill config allowAgentStart true
+```
+
+You can also create `~/.omp/grill/settings.json` by hand to override the defaults:
 
 ```json
 {
@@ -86,7 +95,7 @@ Create `~/.omp/grill/settings.json` to override the defaults:
 
 With `allowAgentStart: false`, Grill tools and their descriptions stay out of the model's context until you start or resume an interview. Questions, replies, and visual requests work normally afterward. Pausing or finishing the last open interview hides the tools again. Set it to `true` to keep the tools available and allow natural-language starts.
 
-Restart OMP after changing `allowAgentStart`. If a fixed port is already in use, Grill reports an error. After changing `host` or `port`, pause and resume the interview to restart its server.
+Changing `allowAgentStart` takes effect immediately, without an OMP restart. If a fixed port is already in use, Grill reports an error. After changing `host` or `port`, pause and resume the interview to restart its server.
 
 Set `OMP_GRILL_HOME` to store settings and sessions somewhere other than `~/.omp/grill`.
 

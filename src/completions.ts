@@ -30,7 +30,27 @@ const SUBS: { name: string; description: string; usage?: string }[] = [
   { name: "history", description: "Open a finished grill's locked page" },
   { name: "sessions", description: "List saved grills for this project" },
   { name: "finish", description: "Finish the selected grill and write the report" },
+  { name: "config", description: "Show or set server settings", usage: "[key] [value]" },
 ];
+
+const CONFIG_KEYS: { name: string; description: string }[] = [
+  { name: "host", description: "Listen address for interview servers" },
+  { name: "port", description: "Fixed port; 0 uses a free port" },
+  { name: "allowAgentStart", description: "Let the agent start interviews" },
+];
+
+const CONFIG_VALUES: Record<string, { name: string; description?: string }[]> = {
+  host: [
+    { name: "127.0.0.1", description: "Local access only" },
+    { name: "0.0.0.0", description: "All interfaces; trusted LAN only" },
+    { name: "::1", description: "IPv6 loopback" },
+  ],
+  port: [{ name: "0", description: "Use a free port" }],
+  allowAgentStart: [
+    { name: "true", description: "Agent may start interviews" },
+    { name: "false", description: "Only /grill commands start interviews" },
+  ],
+};
 
 function item(value: string, label: string, description?: string): AutocompleteItem {
   return { value, label, ...(description ? { description } : {}) };
@@ -53,6 +73,21 @@ export function grillCompletions(
   }
   const verb = argumentPrefix.slice(0, space).toLowerCase();
   const rest = argumentPrefix.slice(space + 1);
+  if (verb === "config") {
+    const parts = rest.split(" ").filter((part) => part.length > 0);
+    const partial = rest.endsWith(" ") ? "" : parts.pop() ?? "";
+    if (parts.length === 0) {
+      const matches = CONFIG_KEYS.filter((key) => prefixMatches(partial, key.name)).map((key) =>
+        item(`config ${key.name} `, key.name, key.description),
+      );
+      return matches.length ? matches : null;
+    }
+    if (parts.length !== 1) return null;
+    const matches = (CONFIG_VALUES[parts[0]] ?? [])
+      .filter((value) => prefixMatches(partial, value.name))
+      .map((value) => item(`config ${parts[0]} ${value.name} `, value.name, value.description));
+    return matches.length ? matches : null;
+  }
   if (rest.includes(" ") && verb !== "answer") return null;
   if (verb === "use") {
     const matches = snapshot.open

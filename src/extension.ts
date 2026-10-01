@@ -12,7 +12,13 @@ import { join } from "node:path";
  import { listSessions, resumeStore } from "./sessions.ts";
  import { createGrillInspector, createGrillWidget, type GrillTheme } from "./tui.ts";
  import type { Action, GrillServer, Publish, SessionSummary, Store } from "./types.ts";
-import { readServerSettings } from "./settings.ts";
+import {
+  displaySettingsPath,
+  formatServerSettings,
+  readServerSettings,
+  validateServerSettings,
+  writeServerSettings,
+} from "./settings.ts";
 
 function grillHome() {
   return process.env.OMP_GRILL_HOME || join(homedir(), ".omp", "grill");
@@ -246,6 +252,7 @@ export default function grillExtension(pi: ExtensionAPI) {
 /grill history          open a finished grill's locked page alongside the others
 /grill sessions         list saved grills for this project
  /grill finish           finish the selected grill and write report.md
+ /grill config           show settings; config <key> <value> sets one
  /grill tui [topic|off]  open this interview in the session terminal`;
   }
   function syncWidget(ctx: ExtensionContext) {
@@ -316,6 +323,44 @@ export default function grillExtension(pi: ExtensionAPI) {
         draftRevision: runtime.store.state.drafts.revision,
       });
     return runtime.store.finish();
+  }
+  async function configure(ctx: ExtensionContext, command: string) {
+    const rest = command === "config" ? "" : command.slice(7).trim();
+    const home = grillHome();
+    const where = displaySettingsPath(home);
+    if (!rest) {
+      const settings = await readServerSettings(home);
+      await pi.sendMessage({
+        customType: "omp-grill:config",
+        content: formatServerSettings(settings, where),
+        display: true,
+      }, { triggerTurn: false });
+      return;
+    }
+    const parts = rest.split(/\s+/);
+    const [key, value] = parts;
+    const usage =
+      "Usage: /grill config [host <address>] | [port <0-65535>] | [allowAgentStart true|false]";
+    if (parts.length !== 2 || !key || !value || !["host", "port", "allowAgentStart"].includes(key))
+      throw new Error(usage);
+    const current = await readServerSettings(home);
+    const candidate: Record<string, unknown> = { ...current };
+    if (key === "host") candidate.host = value;
+    else if (key === "port") candidate.port = Number(value);
+    else
+      candidate.allowAgentStart =
+        value === "true" ? true : value === "false" ? false : value;
+    const next = validateServerSettings(candidate, where);
+    await writeServerSettings(home, next);
+    if (key === "allowAgentStart") {
+      allowAgentStart = next.allowAgentStart;
+      await syncTools();
+    }
+    const applies =
+      key === "host" || key === "port"
+        ? ". Applies when a server next starts; /grill pause then /grill resume restarts it"
+        : "";
+    ctx.ui.notify(`Grill configuration set at ${where}: ${key} ${next[key as "host" | "port" | "allowAgentStart"]}${applies}`, "info");
   }
   async function openTui(ctx: ExtensionContext) {
     if (!ctx.hasUI) throw new Error("Session TUI needs the interactive terminal.");
@@ -446,6 +491,10 @@ export default function grillExtension(pi: ExtensionAPI) {
             .join("\n"),
           "info",
         );
+        return;
+      }
+      if (command === "config" || command.startsWith("config ")) {
+        await configure(ctx, command);
         return;
       }
       if (command === "use" || command.startsWith("use ")) {

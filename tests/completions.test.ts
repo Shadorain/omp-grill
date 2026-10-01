@@ -40,4 +40,14 @@ describe("grill command completions", () => {
     expect(grillCompletions("resume ", snapshot)?.map((item) => item.label)).toEqual(["Paused one · pau22222"]);
     expect(grillCompletions("tui o", snapshot)?.[0]?.value).toBe("tui off ");
   });
+
+  test("completes config keys and values", () => {
+    expect(grillCompletions("conf", snapshot)?.[0]?.value).toBe("config ");
+    expect(grillCompletions("config ", snapshot)?.map((item) => item.label)).toEqual(["host", "port", "allowAgentStart"]);
+    expect(grillCompletions("config al", snapshot)?.map((item) => item.value)).toEqual(["config allowAgentStart "]);
+    expect(grillCompletions("config allowAgentStart ", snapshot)?.map((item) => item.value)).toEqual(["config allowAgentStart true ", "config allowAgentStart false "]);
+    expect(grillCompletions("config host 1", snapshot)?.map((item) => item.value)).toEqual(["config host 127.0.0.1 "]);
+    expect(grillCompletions("config port ", snapshot)?.map((item) => item.value)).toEqual(["config port 0 "]);
+    expect(grillCompletions("config port 1 extra", snapshot)).toBeNull();
+  });
 });

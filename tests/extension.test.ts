@@ -24,7 +24,8 @@ async function fixture(allowAgentStart?: boolean) {
   let command: any;
   let queued = false;
   const urls: string[] = [];
-
+  const notices: string[] = [];
+  const messages: any[] = [];
   const pi = {
     zod: z,
     registerTool(tool: any) {
@@ -36,7 +37,7 @@ async function fixture(allowAgentStart?: boolean) {
     getActiveTools: () => [...active],
     async setActiveTools(names: string[]) { active = names; },
     appendEntry(customType: string, data: unknown) { entries.push({ type: "custom", customType, data }); },
-    sendMessage() {},
+    sendMessage(message: unknown) { messages.push(message); },
     sendUserMessage() {},
   };
   const ctx = {
@@ -47,6 +48,7 @@ async function fixture(allowAgentStart?: boolean) {
     sessionManager: { getSessionId: () => "test-owner", getBranch: () => entries },
     ui: {
       notify(text: string) {
+        notices.push(text);
         const url = text.match(/https?:\/\/[^\s]+/)?.[0];
         if (url) urls.push(url);
       },
@@ -73,6 +75,8 @@ async function fixture(allowAgentStart?: boolean) {
       return tool.execute("call", tool.parameters.parse(params), undefined, undefined, ctx);
     },
     urls,
+    notices,
+    messages,
     event: (name: string, event = {}): Promise<unknown> => events.get(name)(event, ctx),
     setQueued(value: boolean) { queued = value; },
   };
@@ -227,3 +231,27 @@ test("unsourced verified facts pass the tool contract and persist", async () => 
   expect((await request(app.urls.at(-1)!)).context.facts).toEqual([{ id: "known", text: "The workflow has two choices." }]);
 });
 
+test("/grill config shows settings and persists validated values", async () => {
+  const app = await fixture();
+  await app.command("config");
+  expect(app.messages).toHaveLength(1);
+  expect(app.messages[0].customType).toBe("omp-grill:config");
+  expect(app.messages[0].content).toContain("host: 127.0.0.1");
+  expect(app.messages[0].content).toContain("port: 0");
+  expect(app.messages[0].content).toContain("allowAgentStart: false");
+
+  await app.command("config port 43127");
+  expect(JSON.parse(readFileSync(join(app.home, "settings.json"), "utf8"))).toMatchObject({ port: 43127 });
+
+  await app.command("config allowAgentStart true");
+  expect(app.active()).toEqual(["read", "grill_publish", "grill_state"]);
+  await app.command("config allowAgentStart false");
+  expect(app.active()).toEqual(["read"]);
+
+  await expect(app.command("config port nope")).rejects.toThrow("port");
+  await expect(app.command("config allowAgentStart maybe")).rejects.toThrow("boolean");
+  await expect(app.command("config host bad_host")).rejects.toThrow("host");
+  await expect(app.command("config bogus 1")).rejects.toThrow("Usage:");
+  await expect(app.command("config port")).rejects.toThrow("Usage:");
+  await expect(app.command("config host 127.0.0.1 extra")).rejects.toThrow("Usage:");
+});

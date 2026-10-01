@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { isIP } from "node:net";
 
@@ -8,7 +9,7 @@ export interface ServerSettings {
   allowAgentStart: boolean;
 }
 
-const DEFAULT_SETTINGS: ServerSettings = {
+export const DEFAULT_SETTINGS: ServerSettings = {
   host: "0.0.0.0",
   port: 0,
   allowAgentStart: false,
@@ -32,10 +33,49 @@ function validHost(value: unknown): value is string {
     );
 }
 
+export function serverSettingsFile(home: string): string {
+  return join(home, "settings.json");
+}
+
+export function displaySettingsPath(
+  home: string,
+  homeDir = homedir(),
+): string {
+  const path = serverSettingsFile(home);
+  const prefix = homeDir.endsWith("/") ? homeDir : `${homeDir}/`;
+  return path.startsWith(prefix) ? `~/${path.slice(prefix.length)}` : path;
+}
+
+export function validateServerSettings(
+  value: unknown,
+  path = "settings.json",
+): ServerSettings {
+  const fail = (message: string): never => {
+    throw new Error(`Invalid server settings at ${path}: ${message}`);
+  };
+  if (!isRecord(value)) return fail("expected a JSON object");
+  const host = "host" in value ? value.host : DEFAULT_SETTINGS.host;
+  const port = "port" in value ? value.port : DEFAULT_SETTINGS.port;
+  const allowAgentStart = "allowAgentStart" in value
+    ? value.allowAgentStart
+    : DEFAULT_SETTINGS.allowAgentStart;
+  if (!validHost(host)) return fail("host must be an IP address or hostname");
+  if (
+    typeof port !== "number" ||
+    !Number.isInteger(port) ||
+    port < 0 ||
+    port > 65535
+  )
+    return fail("port must be 0 or an integer from 1 to 65535");
+  if (typeof allowAgentStart !== "boolean")
+    return fail("allowAgentStart must be a boolean");
+  return { host, port, allowAgentStart };
+}
+
 export async function readServerSettings(
   home: string,
 ): Promise<ServerSettings> {
-  const path = join(home, "settings.json");
+  const path = serverSettingsFile(home);
   let text: string;
   try {
     text = await readFile(path, "utf8");
@@ -53,32 +93,29 @@ export async function readServerSettings(
       `Invalid JSON in server settings at ${path}: ${String(error)}`,
     );
   }
-  if (!isRecord(value))
-    throw new Error(
-      `Invalid server settings at ${path}: expected a JSON object`,
-    );
+  return validateServerSettings(value, path);
+}
 
-  const host = "host" in value ? value.host : DEFAULT_SETTINGS.host;
-  const port = "port" in value ? value.port : DEFAULT_SETTINGS.port;
-  const allowAgentStart = "allowAgentStart" in value
-    ? value.allowAgentStart
-    : DEFAULT_SETTINGS.allowAgentStart;
-  if (!validHost(host))
-    throw new Error(
-      `Invalid server settings at ${path}: host must be an IP address or hostname`,
-    );
-  if (
-    typeof port !== "number" ||
-    !Number.isInteger(port) ||
-    port < 0 ||
-    port > 65535
-  )
-    throw new Error(
-      `Invalid server settings at ${path}: port must be 0 or an integer from 1 to 65535`,
-    );
-  if (typeof allowAgentStart !== "boolean")
-    throw new Error(
-      `Invalid server settings at ${path}: allowAgentStart must be a boolean`,
-    );
-  return { host, port, allowAgentStart };
+export async function writeServerSettings(
+  home: string,
+  settings: ServerSettings,
+): Promise<void> {
+  const path = serverSettingsFile(home);
+  const valid = validateServerSettings(settings, path);
+  await mkdir(home, { recursive: true });
+  await writeFile(path, `${JSON.stringify(valid, null, 2)}\n`, {
+    mode: 0o600,
+  });
+}
+
+export function formatServerSettings(
+  settings: ServerSettings,
+  path: string,
+): string {
+  return [
+    `Grill configuration at ${path}:`,
+    `  host: ${settings.host}`,
+    `  port: ${settings.port}`,
+    `  allowAgentStart: ${settings.allowAgentStart}`,
+  ].join("\n");
 }
