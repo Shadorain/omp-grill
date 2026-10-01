@@ -7,6 +7,7 @@ import {
   compactSubmission,
   createStore,
   loadStore,
+  readContext,
 } from "../src/store";
 import type { QuestionInput } from "../src/types";
 
@@ -368,5 +369,29 @@ describe("durable grill store", () => {
     symlinkSync(join(root, "outside.md"), join(project, "link.md"));
     writeFileSync(join(root, "outside.md"), "original");
     expect(() => store.exportReport("link.md")).toThrow(/symlink/);
+  });
+
+
+  test("reads a finished interview's context for a continuation", () => {
+    const home = mkdtempSync(join(tmpdir(), "omp-grill-context-"));
+    roots.push(home);
+    const prior = createStore({ home, owner: "alice", project: "/p", topic: "Baseline" });
+    prior.publish({ context: {
+      intent: "Settle the auth boundary.",
+      terms: [{ term: "tenant", definition: "A school", avoid: ["org"] }],
+      facts: [{ id: "f1", text: "Postgres isolates each school" }],
+      risks: [{ id: "r1", text: "Cross-tenant reads leak", mitigation: "Row-level security" }],
+    }, questions: [{ id: "q", title: "Scope", options: [], recommendation: { reason: "r" } }] });
+    prior.submit([{ type: "answer", q: "q", text: "done" }, { type: "finish" }]);
+    prior.finish();
+
+    // A different owner can read the context without claiming the session.
+    const context = readContext(prior.dir);
+    const next = createStore({ home, owner: "bob", project: "/p", topic: "Follow-up", context });
+    expect(next.state.context.intent).toBe("Settle the auth boundary.");
+    expect(next.state.context.terms).toHaveLength(1);
+    expect(next.state.context.terms[0]?.avoid).toEqual(["org"]);
+    expect(next.state.context.risks[0]?.mitigation).toBe("Row-level security");
+    expect(next.state.questions).toEqual([]);
   });
 });

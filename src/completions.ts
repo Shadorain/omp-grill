@@ -28,6 +28,7 @@ const SUBS: { name: string; description: string; usage?: string }[] = [
   { name: "pause", description: "Pause the selected grill" },
   { name: "resume", description: "Open a paused or errored grill" },
   { name: "history", description: "Open a finished grill's locked page" },
+  { name: "fork", description: "Start a grill carrying a finished grill's context", usage: "[id]" },
   { name: "sessions", description: "List saved grills for this project" },
   { name: "finish", description: "Finish the selected grill and write the report" },
   { name: "config", description: "Show or set server settings", usage: "[key] [value]" },
@@ -99,10 +100,10 @@ export function grillCompletions(
     if (rest.includes(" ")) return null;
     return prefixMatches(rest, "off") ? [item("tui off ", "off", "Leave the session interview")] : null;
   }
-  if (verb === "history" || verb === "resume") {
-    const wanted = verb === "history" ? "finished" : ["paused", "error"];
+  if (verb === "history" || verb === "resume" || verb === "fork") {
+    const wanted = verb === "resume" ? ["paused", "error"] : ["finished"];
     const matches = snapshot.saved
-      .filter((grill) => (Array.isArray(wanted) ? wanted.includes(grill.status) : grill.status === wanted))
+      .filter((grill) => wanted.includes(grill.status))
       .filter((grill) => prefixMatches(rest, grill.id) || prefixMatches(rest, grill.topic))
       .map((grill) => item(`${verb} ${grill.id} `, `${grill.topic} · ${grill.id.slice(0, 8)}`, grill.status));
     return matches.length ? matches : null;

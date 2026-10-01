@@ -12,6 +12,7 @@
 - Notes: facts no longer require a source, risks no longer require a mitigation, and saved glossary terms, facts, and risks can be removed.
 - On the last question, Next becomes Send while anything is staged, and Finish once every question is recorded. Answered questions show a check and stay changeable; a different option stages a replacement rather than erasing the recorded answer. When the agent has no further questions, the status reads Ready to finish instead of leaving Next disabled.
 - Defer accepts an optional "revisit when" condition, shown on the question and in the report's Deferred section; reopen clears it.
+- Add `/grill fork [id]` to start a new interview seeded with a finished interview's glossary, facts, risks, and intent.
 - Accept free-text answers, discussion messages, and defer conditions in the TUI (`i`, `m`, `x`), so option-less questions no longer require the browser.
 - Scope saved sessions to the repository (git common directory) instead of the checkout path, so `/grill sessions`, `history`, and `resume` work from any worktree. Exports still resolve against the interview's original checkout; sessions saved before this change are backfilled on load.
  - Visual defaults to a diagram, which fits any topic. A prototype is offered only as a screen preview. The page has a favicon.

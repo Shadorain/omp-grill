@@ -43,6 +43,7 @@ You can keep several interviews open. Use `/grill use <id>` to select the one th
 | `/grill history` | View a finished interview. |
 | `/grill sessions` | List saved interviews for this project. |
 | `/grill finish` | Finish the interview and save its report. |
+| `/grill fork [id]` | Start a separate interview seeded with a finished interview's intent, glossary, facts, and risks. |
 | `/grill config` | Show settings; `/grill config <key> <value>` sets one. Keys and values autocomplete. |
 
 Run `/grill` to list open interviews and commands. Tab completion suggests commands, interview IDs, questions, and options.

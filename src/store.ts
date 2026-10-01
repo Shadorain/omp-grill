@@ -1016,6 +1016,8 @@ export function createStore(input: {
   owner: string;
   project: string;
   topic: string;
+  /** Vocabulary, facts and risks carried over from a related interview. */
+  context?: InterviewContext;
 }): Store {
   validText(input.owner, "owner");
   validText(input.project, "project");
@@ -1039,10 +1041,24 @@ export function createStore(input: {
     handled: 0,
     questions: [],
     drafts: { revision: 0, answers: Object.create(null) as Record<string, DraftAnswer>, threads: Object.create(null) as Record<string, string>, recovery: [] },
-    context: { terms: [], facts: [], risks: [] },
+    context: input.context ?? { terms: [], facts: [], risks: [] },
   };
   persistSync(dir, state);
   return buildStore(dir, state);
+}
+
+/** Context of a finished interview, without claiming ownership. */
+export function readContext(dir: string): InterviewContext {
+  const value: unknown = JSON.parse(fs.readFileSync(join(dir, "state.json"), "utf8"));
+  if (!isRecord(value) || !isRecord(value.context)) fail("Invalid session state");
+  const context = value.context as Partial<InterviewContext>;
+  return {
+    ...(typeof context.intent === "string" ? { intent: context.intent } : {}),
+    ...(typeof context.docPath === "string" ? { docPath: context.docPath } : {}),
+    terms: Array.isArray(context.terms) ? context.terms : [],
+    facts: Array.isArray(context.facts) ? context.facts : [],
+    risks: Array.isArray(context.risks) ? context.risks : [],
+  };
 }
 
 export function loadStore(dir: string, owner: string): Store {

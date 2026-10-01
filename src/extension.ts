@@ -7,11 +7,12 @@ import { join } from "node:path";
    loadStore,
    compactState,
    compactSubmission,
+   readContext,
  } from "./store.ts";
  import { startServer } from "./server.ts";
  import { listSessions, resumeStore } from "./sessions.ts";
  import { createGrillInspector, createGrillWidget, type GrillTheme } from "./tui.ts";
- import type { Action, GrillServer, Publish, SessionSummary, Store } from "./types.ts";
+ import type { Action, GrillServer, InterviewContext, Publish, SessionSummary, Store } from "./types.ts";
 import {
   displaySettingsPath,
   formatServerSettings,
@@ -197,7 +198,7 @@ export default function grillExtension(pi: ExtensionAPI) {
       "info",
     );
   }
-  async function start(topic: string, ctx: ExtensionContext) {
+  async function start(topic: string, ctx: ExtensionContext, context?: InterviewContext) {
     if (ctx.agent.kind === "sub")
       throw new Error("Grills belong to the main OMP session.");
     const owner = ctx.sessionManager.getSessionId();
@@ -206,6 +207,7 @@ export default function grillExtension(pi: ExtensionAPI) {
       owner,
       project: ctx.cwd,
       topic,
+      ...(context ? { context } : {}),
     });
     const runtime: Runtime = { store, owner, ctx };
     select(runtime);
@@ -252,6 +254,7 @@ export default function grillExtension(pi: ExtensionAPI) {
 /grill history          open a finished grill's locked page alongside the others
 /grill sessions         list saved grills for this project
  /grill finish           finish the selected grill and write report.md
+ /grill fork [id]        start a new interview carrying a finished grill's context
  /grill config           show settings; config <key> <value> sets one
  /grill tui [topic|off]  open this interview in the session terminal`;
   }
@@ -681,6 +684,32 @@ export default function grillExtension(pi: ExtensionAPI) {
         }
         if (topic) startTurn(await start(topic, ctx));
         await openTui(ctx);
+        return;
+      }
+      if (command === "fork" || command.startsWith("fork ")) {
+        const query = command === "fork" ? "" : command.slice(5).trim();
+        const done = listSessions(grillHome(), ctx.cwd).filter((s) => s.status === "finished");
+        if (!done.length) throw new Error("No finished grills to fork.");
+        let source = query
+          ? done.find((s) => s.id.startsWith(query) || s.topic === query)
+          : undefined;
+        if (!source) {
+          if (!query && done.length === 1) source = done[0];
+          else {
+            const labels = done.map((s) => `${s.topic} · ${s.id.slice(0, 8)}`);
+            const label = await ctx.ui.select(
+              "Fork which grill's context?",
+              done.map((s, index) => ({ label: labels[index]! })),
+            );
+            if (!label) return;
+            source = done[labels.indexOf(label)];
+            if (!source) return;
+          }
+        }
+        const prior = readContext(source.dir);
+        const runtime = await start(`${source.topic} (fork)`, ctx, prior);
+        ctx.ui.notify(`Carried ${prior.terms.length} terms, ${prior.facts.length} facts, ${prior.risks.length} risks from ${source.topic}.`, "info");
+        startTurn(runtime);
         return;
       }
       startTurn(await start(command, ctx));
