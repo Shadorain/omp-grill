@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Restore prototype blob URL state so switching to the prototype view, generation, and downloads work after the tab-title update.
 - Add `allowAgentStart` (default `false`). Grill tools stay inactive until a user command opens or resumes an interview, and are hidden again when the last open interview is paused or finished. Set it to `true` to allow agent-started interviews.
 - Replace the manual outbox with draft-on-edit: answers and messages autosave to the server with revision CAS, survive reload and resume, and go out together with one Send.
 - Add request-idempotent `/api/send` retries, per-question answer history, and recovery entries for cleared drafts.

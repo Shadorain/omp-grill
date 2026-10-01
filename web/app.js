@@ -29,6 +29,7 @@
   let restoredServerIds = new Set();
   let barNote = "";
   let diagramUrl = "";
+  let prototypeUrl = "";
   let topicTitle = "Decision interview";
   let visualBusy = false;
   let expectingVisual = false;
