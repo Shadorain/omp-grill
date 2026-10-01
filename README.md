@@ -1,152 +1,199 @@
 # omp-grill
 
-Run design interviews with [OMP](https://github.com/can1357/oh-my-pi) in your browser or terminal. Grill presents questions with recommended answers and discussion threads, saves your drafts, and writes a local decision report when you finish.
+[![OMP 18.4.4 or later](https://img.shields.io/badge/OMP-18.4.4%2B-a78bfa?style=flat-square)](https://github.com/can1357/oh-my-pi)
+[![Bun runtime](https://img.shields.io/badge/runtime-Bun-f9f1e1?style=flat-square&logo=bun&logoColor=f9f1e1)](https://bun.sh)
+[![MIT license](https://img.shields.io/badge/license-MIT-69b7ff?style=flat-square)](LICENSE)
 
-![Task board interview](docs/interview.png)
+Design interviews in your browser or OMP terminal. Answer questions, discuss tradeoffs, try a clickable prototype, and save the decisions as a report.
 
-<details>
-<summary>More screenshots — prototypes, diagrams, notes, exports, and terminal</summary>
+[Quick start](#quick-start) · [Exports](#exports) · [Terminal](#terminal) · [Settings](#settings) · [Changelog](CHANGELOG.md) · [Report a bug](https://github.com/Shadorain/omp-grill/issues)
 
-### Interactive prototypes
+## Quick start
 
-Try screen flows in a sandboxed preview, then send feedback to redraw them.
-
-![Interactive task board prototype with local controls and visual feedback](docs/prototype.png)
-
-### System diagrams
-
-Explore architecture and flows without turning every interview into a screen design.
-
-![System diagram connecting the browser, Grill server, session store, and OMP agent](docs/diagram.png)
-
-### Shared interview context
-
-Keep the goal, vocabulary, facts, and risks alongside the questions.
-
-![Notes drawer with the interview goal, glossary, and verified facts](docs/notes.png)
-
-### Decision reports and exports
-
-Finish locally, then export Markdown, ADRs, a beads graph, SVG, or HTML.
-
-![Finished interview report with the ADR export format and destination directory](docs/report.png)
-
-### Session terminal
-
-The current terminal inspector supports option selection, written answers, messages, and defer conditions.
-
-![Terminal inspector showing a staged answer, its rationale, and current keyboard shortcuts](docs/tui.png)
-
-</details>
-
-Requires OMP 18.4.4 or later. Restart OMP after installing or updating.
-
-## Install
+Requires [OMP](https://github.com/can1357/oh-my-pi) 18.4.4 or later. Run these commands inside OMP:
 
 ```text
 /marketplace add Shadorain/omp-grill
 /marketplace install grill@omp-grill
 ```
 
-Start an interview with `/grill <topic>` or `/grill tui <topic>`. To let the agent start interviews from a natural-language request, enable `allowAgentStart` below.
+Restart OMP after installing or updating. Then start an interview:
 
-## Use
+```text
+/grill How should our task board handle task creation?
+```
 
-1. Open the URL printed by OMP. Keep the full URL private because it contains an access token.
-2. Choose an option, write an answer, or add a discussion message. Grill saves these as drafts without sending them to the agent.
-3. Click **Send N to agent**, or press Cmd/Ctrl+Enter, to send your drafts together.
-4. Click **Finish** to save the interview as `report.md`.
+1. Open the URL OMP prints. Keep it private. The full URL contains an access token.
+2. Pick an option or write your own answer. Add a discussion message if you want to question the recommendation.
+3. Click **Send N to agent**, or press Cmd/Ctrl+Enter. Answers and messages autosave as drafts until you send them.
+4. Click **Finish** to save `report.md` in the local interview folder. Use Export to copy it into your project.
 
-Explore, Defer, Reopen, and visual requests reach the agent immediately rather than waiting for Send. Defer asks for an optional "revisit when" condition shown in the report's Deferred section. The tab title shows a `(N)` badge while the turn is yours. On supported secure browser origins (such as localhost), you can grant desktop notification permission for agent replies while the tab is hidden.
+Grill uses your OMP provider for questions, replies, and visual requests. The interface, draft storage, and report generation use no model tokens. Session files stay on your machine.
 
-You can keep several interviews open. Use `/grill use <id>` to select the one that commands and agent replies should target.
+![Browser interview with a staged answer and discussion message](docs/interview.png)
 
-Saved interviews are shared across a repository's linked worktrees. Export paths stay relative to the checkout where the interview was started. `/grill fork` creates a new interview carrying prior context, not prior questions or answers; use `/grill resume` to restore an unfinished interview.
+<details>
+<summary>More screenshots</summary>
 
-| Command | Description |
+### Interactive prototypes
+
+Click through a screen preview without calling the agent. Send feedback when you want it redrawn.
+
+![Task board prototype with local controls and visual feedback](docs/prototype.png)
+
+### System diagrams
+
+Ask for a diagram to review architecture or a flow. A prototype is optional when the topic is a screen.
+
+![Diagram connecting the browser, Grill server, session store, and OMP agent](docs/diagram.png)
+
+### Interview notes
+
+Save the goal, glossary, facts, and risks. The agent sees changes on your next send.
+
+![Notes drawer with the interview goal, glossary, and facts](docs/notes.png)
+
+### Reports and exports
+
+Review the report and choose an export format after finishing.
+
+![Finished report with the ADR export format and destination directory](docs/report.png)
+
+### Terminal inspector
+
+Stage options, write answers, and discuss questions without leaving OMP.
+
+![Terminal inspector with a staged answer and keyboard shortcuts](docs/tui.png)
+
+</details>
+
+## Using an interview
+
+**Explore tradeoffs** asks the agent to compare options. **Defer** sets a question aside and lets you record when to revisit it. **Reopen** returns a recorded question to the discussion. These actions and visual requests reach the agent immediately, without waiting for Send.
+
+The browser tab title counts open questions while it is your turn. On supported secure origins, such as localhost, you can allow desktop notifications for replies while the tab is hidden.
+
+Drafts survive reloads and resume. If two tabs edit the same drafts, the page lets you choose which copy to keep. The other copy remains recoverable.
+
+If an agent turn stops, the page keeps the batch and shows the error. Run `/grill resume` in the owning OMP session to retry it. An attached interview keeps its URL.
+
+### Multiple interviews and worktrees
+
+Use `/grill use <id>` to select the interview that commands and agent replies target. `/grill sessions` lists saved interviews across the repository's linked worktrees.
+
+`/grill resume` restores a paused or errored interview. `/grill fork` starts a new one with a finished interview's goal, glossary, facts, and risks. Fork does not copy questions or answers.
+
+## Exports
+
+Finish the interview first. In the Report drawer, choose a format, optionally enter a destination, and click Export. You can also use OMP commands:
+
+```text
+/grill export report docs/task-board.md
+/grill export adr
+/grill export beads
+```
+
+| Format | Default destination | What it writes |
+| --- | --- | --- |
+| `report` | `docs/grill-report.md` | Markdown decisions and discussion. |
+| `adr` | `docs/adr/` | One numbered architecture decision record per answered durable decision. |
+| `beads` | `docs/grill-beads.json` | A `bd create --graph` plan with an epic, tasks, and dependency edges. |
+| `diagram` | `docs/grill-diagram.svg` | The saved system diagram. |
+| `prototype` | `docs/grill-prototype.html` | The saved interactive prototype. |
+
+Paths are relative to the checkout where the interview started, even if you resume it from another worktree. Existing files require overwrite confirmation in the browser or `--force` in the command.
+
+ADRs continue numbering after existing records. They contain the recorded decision and explored alternatives, without inferred consequences. Diagram and prototype exports require a saved visual of that kind.
+
+To import a beads plan, run this in your project:
+
+```sh
+bd create --graph docs/grill-beads.json
+```
+
+Include a full Linear issue URL in the interview topic if you want the parent epic linked to it. Grill uses that URL as `external_ref`. It does not guess the workspace from a bare ID such as `CHR-144`.
+
+## Terminal
+
+Run `/grill tui` for the selected interview, or `/grill tui <topic>` to start one in the terminal. The browser remains available.
+
+| Key | Action |
+| --- | --- |
+| `j` / `k` | Move between questions. |
+| `a` through `d` | Stage an option. |
+| `i` | Write an answer, including questions with no options. |
+| `m` | Write a discussion message. |
+| `x` | Defer with an optional revisit condition. |
+| `Enter` / `Esc` while writing | Save or discard the edit. |
+| `Enter` outside the editor | Send drafts. |
+| `e` | Explore tradeoffs. |
+| `f` twice | Finish. |
+| `Tab` | Switch between the question and discussion. |
+| `Esc` / `q` outside the editor | Close the inspector. The interview stays open. |
+
+While the agent works, drafts remain editable. Sending, exploring, deferring, and finishing wait for its reply.
+
+## Commands
+
+<details>
+<summary>All commands</summary>
+
+Run `/grill` to list open interviews and commands. Tab completion suggests commands, interview IDs, question IDs, options, export formats, and settings.
+
+| Command | Action |
 | --- | --- |
 | `/grill <topic>` | Start an interview. |
-| `/grill tui` | Open the selected interview in the terminal. |
-| `/grill tui <topic>` | Start an interview and open it in the terminal. |
-| `/grill tui off` | Turn off the terminal view without closing the interview. |
+| `/grill tui [topic]` | Open the terminal inspector, or start an interview there. |
+| `/grill tui off` | Turn off terminal mode without closing the interview. |
 | `/grill use <id>` | Select an open interview. |
 | `/grill url` | Show its private URL. |
 | `/grill questions` | List its questions. |
-| `/grill answer <id> <option> [note]` | Record an option with an optional note. |
+| `/grill answer <id> <option> [note]` | Record an option and optional note. |
 | `/grill answer <id> -- <text>` | Record a written answer. |
 | `/grill reply <id> <text>` | Send a message about a question. |
 | `/grill pause` | Pause the selected interview. |
 | `/grill resume [id]` | Resume a paused or errored interview. |
 | `/grill history [id]` | View a finished interview. |
 | `/grill sessions` | List saved interviews for this repository. |
-| `/grill finish` | Finish the interview and save its report. |
-| `/grill export <kind> [path] [--force]` | Export `report`, `adr`, `beads`, `diagram`, or `prototype` from a finished interview. Kinds autocomplete; `--force` permits overwriting. |
-| `/grill fork [id]` | Start a separate interview seeded with a finished interview's intent, glossary, facts, and risks. |
-| `/grill config` | Show settings; `/grill config <key> <value>` sets one. Keys and values autocomplete. |
+| `/grill finish` | Finish and save the report. |
+| `/grill export <kind> [path] [--force]` | Export an artifact into the project. |
+| `/grill fork [id]` | Start a new interview with a finished interview's context. |
+| `/grill config [key] [value]` | Show or change settings. |
 
-Run `/grill` to list open interviews and commands. Tab completion suggests commands, interview IDs, questions, and options.
+</details>
 
-In the browser's Report drawer, choose an export format and press Export. The path is optional; ADRs use a directory, while the other formats use a file. Unavailable formats are disabled. ADRs become numbered `docs/adr/NNNN-slug.md` records, with recorded decisions and considered options but no inferred consequences. Beads defaults to `docs/grill-beads.json`; import it from your project with `bd create --graph docs/grill-beads.json`. Plans retain an explicit `https://linear.app/<workspace>/issue/<ID>` URL from the interview topic as the parent epic's `external_ref`; a bare ticket ID is not enough to infer the workspace.
+## Settings
 
-If an agent turn stops, the page shows its error and keeps the saved batch. Run `/grill resume` in the owning OMP session to retry it. Resuming an attached error keeps the same page URL; finished interviews are excluded from resume.
-
-The Visual view can show a system diagram or an interactive screen prototype. Prototypes run in a sandbox, so clicking inside one does not call the agent. Use diagrams for flows and architecture, and prototypes to explore a screen design.
-
-Recoverable drafts include server archives and copies saved by this browser. Restore an answer or message to stage it again; the archived copy stays available. If two tabs edit the same drafts, choose which copy to keep; the other remains recoverable.
-
-Prototype labels and displayed text update as you edit their inputs, without losing input focus or the caret. Dialog actions must target the current screen, and select actions must use a declared option. Wide sequence diagrams scroll horizontally so actor labels stay readable; self-transitions and self-messages are rendered.
-
-### `/grill tui`
-
-Prefer the terminal? Run `/grill tui` to open the selected interview inside your OMP session. The browser remains available, so you can use either view.
-
-Use `j`/`k` to move between questions and `a`-`d` to stage an option. Press `i` to write an answer (the only way to answer a question with no options), `m` to write a discussion message, and `x` to defer with an optional "revisit when" condition; `enter` saves, `esc` discards. Press `enter` to send, `e` to explore, or `f` twice to finish. Use `tab` to view the discussion and `esc` or `q` to close the inspector. Closing the inspector leaves the interview open.
-
-Starting with `/grill tui <topic>` also wakes the agent to publish the first questions. While a batch is pending, drafts stay editable, but Send, Explore, Defer, and Finish wait for acknowledgement.
-
-## Configuration
-
-Run `/grill config` in the session to show the current settings. Set a value with `/grill config <key> <value>` (tab completion suggests keys and values). Settings live in `settings.json`, which the command creates:
+Use `/grill config` to see current values. For example:
 
 ```text
 /grill config host 127.0.0.1
-/grill config port 43127
 /grill config allowAgentStart true
 ```
 
-You can also create `~/.omp/grill/settings.json` by hand to override the defaults:
-
-```json
-{
-  "host": "127.0.0.1",
-  "port": 43127,
-  "allowAgentStart": false
-}
-```
-
-| Setting | Default | Description |
+| Setting | Default | Meaning |
 | --- | --- | --- |
-| `host` | `0.0.0.0` | The address the server listens on. |
-| `port` | `0` | Use a free port. A fixed port applies to the first interview; later interviews use free ports. |
-| `allowAgentStart` | `false` | Allow the agent to start interviews with `grill_publish`. Otherwise, start or resume an interview with `/grill` before its tools become available. |
+| `host` | `0.0.0.0` | Listen on all IPv4 interfaces. Set `127.0.0.1` for local access only. |
+| `port` | `0` | Pick a free port. A fixed port applies to the first interview; later interviews use free ports. |
+| `allowAgentStart` | `false` | Let the agent start interviews from natural-language requests. |
 
-With `allowAgentStart: false`, Grill tools and their descriptions stay out of the model's context until you start or resume an interview. Questions, replies, and visual requests work normally afterward. Pausing or finishing the last open interview hides the tools again. Set it to `true` to keep the tools available and allow natural-language starts.
+By default, start or resume an interview with `/grill` before the agent can use Grill tools. Pausing or finishing the last open interview hides them again. Set `allowAgentStart` to `true` to keep them available. This change takes effect immediately.
 
-Changing `allowAgentStart` takes effect immediately, without an OMP restart. If a fixed port is already in use, Grill reports an error. After changing `host` or `port`, pause and resume the interview to restart its server.
+After changing `host` or `port`, pause and resume the interview to restart its server. A fixed port already in use causes an error.
 
-Set `OMP_GRILL_HOME` to store settings and sessions somewhere other than `~/.omp/grill`.
+Settings live in `~/.omp/grill/settings.json`. You can edit that file directly. Set `OMP_GRILL_HOME` to move settings and session files to another directory.
 
-**Network safety:** The default address exposes Grill on all IPv4 interfaces. Use it only on a trusted LAN, never the public internet. HTTP is unencrypted. Set `host` to `127.0.0.1` for local access.
+### Network safety
 
-For a remote OMP host, forward the server's port over SSH:
+The default listener is reachable on your LAN. HTTP is unencrypted. Use a trusted network, never expose Grill to the public internet, and keep interview URLs private.
+
+For a remote OMP host, set `host` to `127.0.0.1` and forward the port over SSH:
 
 ```sh
 ssh -N -L 43127:127.0.0.1:43127 user@omp-host
 ```
 
-Replace `43127` with the actual server port.
-
-Session files stay on your machine. The interface, draft storage, and report generation do not use model tokens. Questions, replies, and visual requests use your configured OMP provider.
+Replace `43127` with the port OMP prints, then open the forwarded URL on localhost.
 
 ## Development
 
@@ -159,10 +206,12 @@ bun run typecheck
 bun run demo
 ```
 
-Run `bun run demo` to try Grill with a scripted local provider. Open the printed `DEMO_URL`. The demo uses no inference tokens, and Ctrl+C stops it and removes its temporary files.
+The demo uses a scripted local provider and no inference tokens. Open its printed `DEMO_URL`. Ctrl+C stops it and removes temporary files.
 
-Inspired by [grill-with-ui](https://github.com/jasonku09/grill-with-ui). Grill renders diagrams and prototypes from structured specs rather than running model-written HTML.
+For changes to the extension, read the [architecture](docs/architecture.md), [command guide](docs/commands.md), and [testing guide](docs/testing.md).
+
+Inspired by [grill-with-ui](https://github.com/jasonku09/grill-with-ui). Grill renders diagrams and prototypes from structured specs instead of running model-written HTML.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE).
