@@ -1,12 +1,74 @@
-# omp-grill
+<div align="center">
 
-[![OMP 18.4.4 or later](https://img.shields.io/badge/OMP-18.4.4%2B-a78bfa?style=flat-square)](https://github.com/can1357/oh-my-pi)
-[![Bun runtime](https://img.shields.io/badge/runtime-Bun-f9f1e1?style=flat-square&logo=bun&logoColor=f9f1e1)](https://bun.sh)
-[![MIT license](https://img.shields.io/badge/license-MIT-69b7ff?style=flat-square)](LICENSE)
+<img src="web/favicon.svg" alt="Grill icon" width="96" height="96">
 
-Design interviews in your browser or OMP terminal. Answer questions, discuss tradeoffs, try a clickable prototype, and save the decisions as a report.
+<h1>omp-grill</h1>
 
-[Quick start](#quick-start) · [Exports](#exports) · [Terminal](#terminal) · [Settings](#settings) · [Changelog](CHANGELOG.md) · [Report a bug](https://github.com/Shadorain/omp-grill/issues)
+<p>Design interviews in your browser or OMP terminal.</p>
+
+<p>
+  <a href="https://github.com/can1357/oh-my-pi"><img src="https://img.shields.io/badge/OMP-18.4.4%2B-a78bfa?style=for-the-badge" alt="OMP 18.4.4 or later"></a>
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-f9f1e1?style=for-the-badge&amp;logo=bun&amp;logoColor=f9f1e1" alt="Bun runtime"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-69b7ff?style=for-the-badge" alt="MIT license"></a>
+</p>
+
+<p>
+  <a href="#summary">Summary</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#token-efficiency">Token efficiency</a> ·
+  <a href="#exports">Exports</a> ·
+  <a href="#terminal">Terminal</a>
+  <br>
+  <a href="#commands">Commands</a> ·
+  <a href="#settings">Settings</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="https://github.com/Shadorain/omp-grill/issues">Report a bug</a>
+</p>
+
+</div>
+
+<h2 align="center">Summary</h2>
+
+> Keep model work focused on questions and decisions.
+
+Grill aims to be token-efficient at every step. Answer questions, discuss tradeoffs, try a clickable prototype, and save the decisions as a report. The agent handles interview reasoning; code handles the UI, drafts, rendering, and exports.
+
+![Browser interview with a staged answer and discussion message](docs/interview.png)
+
+<details>
+<summary>More screenshots</summary>
+
+### Interactive prototypes
+
+Click through a screen preview without calling the agent. The model supplies a structured spec, not HTML or JavaScript. Grill renders it locally; send feedback only when you want it redrawn.
+
+![Task board prototype with local controls and visual feedback](docs/prototype.png)
+
+### System diagrams
+
+Ask for a diagram to review architecture or a flow. Grill renders the agent's structured spec into SVG locally. A prototype is optional when the topic is a screen.
+
+![Diagram connecting the browser, Grill server, session store, and OMP agent](docs/diagram.png)
+
+### Interview notes
+
+Save the goal, glossary, facts, and risks without a model call. The agent sees changes on your next send.
+
+![Notes drawer with the interview goal, glossary, and facts](docs/notes.png)
+
+### Reports and exports
+
+Review the report and choose an export format after finishing. Preview, Finish, and Export run locally without model calls.
+
+![Finished report with the ADR export format and destination directory](docs/report.png)
+
+### Terminal inspector
+
+Stage options, write answers, and discuss questions without leaving OMP.
+
+![Terminal inspector with a staged answer and keyboard shortcuts](docs/tui.png)
+
+</details>
 
 ## Quick start
 
@@ -25,51 +87,29 @@ Restart OMP after installing or updating. Then start an interview:
 
 1. Open the URL OMP prints. Keep it private. The full URL contains an access token.
 2. Pick an option or write your own answer. Add a discussion message if you want to question the recommendation.
-3. Click **Send N to agent**, or press Cmd/Ctrl+Enter. Answers and messages autosave as drafts until you send them.
+3. Click **Send N to agent**, or press Cmd/Ctrl+Enter. Answers and messages autosave locally as drafts. Batch several together instead of starting a model turn for every edit.
 4. Click **Finish** to save `report.md` in the local interview folder. Use Export to copy it into your project.
 
-Grill uses your OMP provider for questions, replies, and visual requests. The interface, draft storage, and report generation use no model tokens. Session files stay on your machine.
+Questions, replies, and visual requests use your OMP provider. The interface, draft storage, and report generation use no model tokens. Session files stay on your machine.
 
-![Browser interview with a staged answer and discussion message](docs/interview.png)
+## Token efficiency
 
-<details>
-<summary>More screenshots</summary>
+Grill keeps model calls for interview reasoning and delegates routine work to code.
 
-### Interactive prototypes
+| Step | How Grill saves model work |
+| --- | --- |
+| Before an interview | Grill tools stay hidden by default, so their schemas do not occupy model context until needed. |
+| Drafting | Edits and autosave stay local. Send batches answers and discussion messages into one submission. |
+| Sending | The agent receives compact actions and related questions. Relevant discussion includes only recent entries, not the full stored history. |
+| Recovering context | The agent can request compact decisions, open questions, and the pending batch instead of replaying the full interview. |
+| Trying visuals | The agent emits structured specs. Code renders diagrams and prototypes; prototype clicks do not call the model. |
+| Finishing and exporting | Code writes reports, ADRs, beads plans, SVG, and HTML from saved state. No model-written UI or extra document-generation turn. |
 
-Click through a screen preview without calling the agent. Send feedback when you want it redrawn.
-
-![Task board prototype with local controls and visual feedback](docs/prototype.png)
-
-### System diagrams
-
-Ask for a diagram to review architecture or a flow. A prototype is optional when the topic is a screen.
-
-![Diagram connecting the browser, Grill server, session store, and OMP agent](docs/diagram.png)
-
-### Interview notes
-
-Save the goal, glossary, facts, and risks. The agent sees changes on your next send.
-
-![Notes drawer with the interview goal, glossary, and facts](docs/notes.png)
-
-### Reports and exports
-
-Review the report and choose an export format after finishing.
-
-![Finished report with the ADR export format and destination directory](docs/report.png)
-
-### Terminal inspector
-
-Stage options, write answers, and discuss questions without leaving OMP.
-
-![Terminal inspector with a staged answer and keyboard shortcuts](docs/tui.png)
-
-</details>
+Questions, replies, option analysis, and visual generation or regeneration still use model tokens. Total usage also depends on your surrounding OMP session context and model.
 
 ## Using an interview
 
-**Explore tradeoffs** asks the agent to compare options. **Defer** sets a question aside and lets you record when to revisit it. **Reopen** returns a recorded question to the discussion. These actions and visual requests reach the agent immediately, without waiting for Send.
+**Explore tradeoffs** asks the agent to compare options. **Defer** sets a question aside and lets you record when to revisit it. **Reopen** returns a recorded question to the discussion. These actions and visual requests start an agent turn immediately, without waiting for Send.
 
 The browser tab title counts open questions while it is your turn. On supported secure origins, such as localhost, you can allow desktop notifications for replies while the tab is hidden.
 
@@ -81,11 +121,11 @@ If an agent turn stops, the page keeps the batch and shows the error. Run `/gril
 
 Use `/grill use <id>` to select the interview that commands and agent replies target. `/grill sessions` lists saved interviews across the repository's linked worktrees.
 
-`/grill resume` restores a paused or errored interview. `/grill fork` starts a new one with a finished interview's goal, glossary, facts, and risks. Fork does not copy questions or answers.
+`/grill resume` restores a paused or errored interview. `/grill fork` starts a new one with a finished interview's goal, glossary, facts, and risks, so you can reuse that context instead of entering it again. Fork does not copy questions or answers.
 
 ## Exports
 
-Finish the interview first. In the Report drawer, choose a format, optionally enter a destination, and click Export. You can also use OMP commands:
+Finish the interview first. Every export format is generated locally from saved state, without another model call. In the Report drawer, choose a format, optionally enter a destination, and click Export. You can also use OMP commands:
 
 ```text
 /grill export report docs/task-board.md
@@ -115,7 +155,7 @@ Include a full Linear issue URL in the interview topic if you want the parent ep
 
 ## Terminal
 
-Run `/grill tui` for the selected interview, or `/grill tui <topic>` to start one in the terminal. The browser remains available.
+Run `/grill tui` for the selected interview, or `/grill tui <topic>` to start one in the terminal. The browser remains available. As in the browser, drafting and saving edits use no model tokens; Send batches them for the agent.
 
 | Key | Action |
 | --- | --- |
@@ -177,7 +217,7 @@ Use `/grill config` to see current values. For example:
 | `port` | `0` | Pick a free port. A fixed port applies to the first interview; later interviews use free ports. |
 | `allowAgentStart` | `false` | Let the agent start interviews from natural-language requests. |
 
-By default, start or resume an interview with `/grill` before the agent can use Grill tools. Pausing or finishing the last open interview hides them again. Set `allowAgentStart` to `true` to keep them available. This change takes effect immediately.
+By default, start or resume an interview with `/grill` before the agent can use Grill tools. Pausing or finishing the last open interview hides them again, keeping their schemas out of model context when Grill is idle. Set `allowAgentStart` to `true` to keep them available. This change takes effect immediately.
 
 After changing `host` or `port`, pause and resume the interview to restart its server. A fixed port already in use causes an error.
 
