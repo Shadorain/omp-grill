@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { GrillInspector, type GrillTheme } from "../src/tui.ts";
+import { createGrillWidget, grillWidgetLines, grillWidgetTitle, GrillInspector, type GrillTheme } from "../src/tui.ts";
 import type { GrillState } from "../src/types.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,6 +38,37 @@ function state(): GrillState {
     context: { terms: [], facts: [], risks: [] },
   };
 }
+
+describe("grill status widget", () => {
+  test("renders a compact summary and optional full topic, status, and private URL", () => {
+    const current = state();
+    current.topic = "A deliberately long topic that should be shortened in the status line";
+    current.error = "connection lost";
+    current.status = "error";
+    const compact = grillWidgetLines(current, 80, theme);
+    expect(compact).toHaveLength(1);
+    expect(compact[0]).toContain("0/1");
+    expect(compact[0]).toContain("error");
+    expect(grillWidgetTitle(current).length).toBeLessThan(current.topic.length);
+
+    const expanded = createGrillWidget(() => current, theme, () => ({
+      expanded: true,
+      url: "http://127.0.0.1:43127/private",
+    })).render(100);
+    expect(expanded).toHaveLength(4);
+    expect(expanded[1]).toContain(current.topic);
+    expect(expanded[2]).toContain("error: connection lost");
+    expect(expanded[3]).toContain("http://127.0.0.1:43127/private");
+  });
+
+  test("fits the compact summary to narrow widths and hides finished sessions", () => {
+    const current = state();
+    expect(grillWidgetLines(current, 12, theme)[0].length).toBeLessThanOrEqual(12);
+    current.status = "finished";
+    expect(grillWidgetLines(current, 80, theme)).toEqual([]);
+    expect(createGrillWidget(() => current, theme).render(80)).toEqual([]);
+  });
+});
 
 describe("grill session TUI", () => {
   test("pending submissions block new actions but allow staging and resume after acknowledgement", () => {

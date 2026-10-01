@@ -12,7 +12,7 @@
     <div class="topbar-left">
       <a class="brand-mark" href="/" aria-label="Grill home"><img src="/favicon.svg" alt="" width="30" height="30"></a>
       <div class="topic-block">
-        <strong id="topic-title" class="topic-title">Decision interview</strong>
+        <button id="topic-title" class="topic-title" type="button" aria-expanded="false">Decision interview</button>
         <span id="topic-note" class="topic-note" hidden></span>
       </div>
     </div>
@@ -68,6 +68,13 @@
         <span id="visual-version" class="version-badge" hidden></span>
         <span id="visual-stale" class="stale-badge" hidden>Out of date</span>
         <span id="visual-drawing" class="hint" hidden>Drawing&hellip;</span>
+        <div id="diagram-controls" class="diagram-controls" hidden role="group" aria-label="Diagram view controls">
+          <button id="diagram-zoom-out" class="btn btn-secondary" type="button" aria-label="Zoom out">−</button>
+          <span id="diagram-zoom-level" class="zoom-level" aria-live="polite">100%</span>
+          <button id="diagram-zoom-in" class="btn btn-secondary" type="button" aria-label="Zoom in">+</button>
+          <button id="diagram-fit" class="btn btn-secondary" type="button">Fit</button>
+          <button id="diagram-reset" class="btn btn-secondary" type="button">Reset</button>
+        </div>
         <span class="spacer"></span>
         <button id="regen-btn" class="btn btn-secondary" type="button">Regenerate</button>
         <button id="download-visual" class="btn btn-secondary" type="button" disabled>Download</button>

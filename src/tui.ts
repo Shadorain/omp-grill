@@ -57,34 +57,52 @@ export function grillView(state: GrillState | undefined) {
   return { state, staged };
 }
 
-export function grillWidgetLines(state: GrillState, width: number, theme: GrillTheme): string[] {
+const WIDGET_TITLE_WIDTH = 32;
+
+export function grillWidgetTitle(state: GrillState): string {
+  const topic = replaceTabs(state.topic).replace(/\s+/g, " ").trim();
+  return truncateToWidth(topic || "Grill", WIDGET_TITLE_WIDTH);
+}
+
+export interface GrillWidgetOptions {
+  expanded?: boolean;
+  url?: string;
+}
+
+export function grillWidgetLines(
+  state: GrillState,
+  width: number,
+  theme: GrillTheme,
+  options: GrillWidgetOptions = {},
+): string[] {
+  if (state.status === "finished") return [];
   const answered = state.questions.filter((question) => question.status !== "open").length;
   const rail = paint(theme, "accent", glyph(theme, "advisor.rail", "▎"));
-  const open = state.questions.find((question) => question.status === "open");
-  const parts = [
-    paint(theme, "accent", state.topic),
-    paint(theme, "text", `${answered}/${state.questions.length || 0}`),
-    paint(theme, state.status === "error" ? "error" : state.status === "working" ? "warning" : "success", state.status),
-  ];
-  if (open) parts.push(paint(theme, "dim", open.title));
-  let line = `${rail} ${parts.join(dot(theme))}`;
-  while (visibleWidth(line) > width && parts.length > 2) {
-    parts.pop();
-    line = `${rail} ${parts.join(dot(theme))}`;
+  const statusTone = state.status === "error" ? "error" : state.status === "working" ? "warning"
+    : state.status === "paused" ? "dim" : "success";
+  const line = `${rail} ${paint(theme, "accent", grillWidgetTitle(state))}${dot(theme)}`
+    + `${paint(theme, "text", `${answered}/${state.questions.length}`)}${dot(theme)}`
+    + paint(theme, statusTone, state.status);
+  const lines = [clip(line, width)];
+  if (options.expanded) {
+    lines.push(clip(paint(theme, "dim", `  Topic: ${replaceTabs(state.topic).replace(/\s+/g, " ").trim()}`), width));
+    const status = state.error && state.status === "error" ? `${state.status}: ${state.error}` : state.status;
+    lines.push(clip(paint(theme, statusTone, `  Status: ${status}`), width));
+    if (options.url) lines.push(clip(paint(theme, "dim", `  URL: ${options.url}`), width));
   }
-  const hint = paint(theme, "dim", "j/k questions · a-d stage · enter send · esc close");
-  return [clip(line, width), clip(`  ${hint}`, width)];
+  return lines;
 }
 
 export class GrillWidget implements Component {
   constructor(
     private readonly getState: () => GrillState | undefined,
     private readonly theme: GrillTheme,
+    private readonly getOptions: () => GrillWidgetOptions = () => ({}),
   ) {}
   render(width: number): string[] {
     const state = this.getState();
     if (!state) return [];
-    return grillWidgetLines(state, width, this.theme);
+    return grillWidgetLines(state, width, this.theme, this.getOptions());
   }
   invalidate(): void {}
 }
@@ -310,8 +328,12 @@ export class GrillInspector implements Component {
   }
 }
 
-export function createGrillWidget(getState: () => GrillState | undefined, theme: GrillTheme): GrillWidget {
-  return new GrillWidget(getState, theme);
+export function createGrillWidget(
+  getState: () => GrillState | undefined,
+  theme: GrillTheme,
+  getOptions?: () => GrillWidgetOptions,
+): GrillWidget {
+  return new GrillWidget(getState, theme, getOptions);
 }
 
 export function createGrillInspector(

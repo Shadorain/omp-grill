@@ -1,6 +1,14 @@
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
+  const clone = (value) => JSON.parse(JSON.stringify(value));
+  const safeText = (value) => typeof value === "string" ? value : "";
+  const storagePrefix = "grill-drafts:v2:";
+  const optionLetter = (question, id) => {
+    const index = question.options.findIndex((option) => option.id === id);
+    return index < 0 ? "" : index < 26 ? String.fromCharCode(65 + index) : "?";
+  };
+  const uid = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
   const tokenKey = `grill-token:${location.pathname}`;
   const fragmentToken = location.hash.slice(1);
   let token = fragmentToken || sessionStorage.getItem(tokenKey) || "";
@@ -40,19 +48,17 @@
   let loadedPrototypeVersion = null;
   let loadedDiagramVersion = null;
   let artifactSignature = "";
-  const storagePrefix = "grill-drafts:v2:";
-  const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const safeText = (value) => typeof value === "string" ? value : "";
-  const clone = (value) => JSON.parse(JSON.stringify(value));
-  const uid = () => {
-    const data = new Uint32Array(4);
-    crypto.getRandomValues(data);
-    return Array.from(data, (part) => part.toString(16).padStart(8, "0")).join("-");
-  };
-  const optionLetter = (q, optionId) => {
-    const index = (q?.options || []).findIndex((option) => option.id === optionId);
-    return index < 0 ? "" : LETTERS[index] || "?";
-  };
+  let diagramScale = 1;
+  let diagramBaseSize = null;
+  let expandedTopic = false;
+  let diagramPan = null;
+  function shortTopic(value) {
+    const clean = value.trim().replace(/\s+/g, " ");
+    if (clean.length <= 54) return clean;
+    const prefix = clean.slice(0, 54);
+    const boundary = prefix.lastIndexOf(" ");
+    return `${prefix.slice(0, boundary > 30 ? boundary : 54).trimEnd()}…`;
+  }
   const api = (path, options = {}) => {
     const headers = new Headers(options.headers || {});
     headers.set("X-Grill-Token", token);
@@ -99,7 +105,7 @@
   function updateTitle() {
     const count = openCount();
     const badge = state?.status === "waiting" && count > 0 ? `(${count}) ` : "";
-    document.title = `${badge}${topicTitle} — Grill`;
+    document.title = `${badge}${shortTopic(topicTitle)} — Grill`;
   }
   function notifyTurn(count) {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
@@ -778,7 +784,7 @@
     const parsed = new DOMParser().parseFromString(text, "image/svg+xml");
     if (parsed.querySelector("parsererror") || parsed.documentElement.localName !== "svg") throw new Error("Diagram response is not valid SVG");
     const allowed = new Set(["svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "defs", "marker"]);
-    const attrs = new Set(["viewBox", "width", "height", "x", "y", "x1", "x2", "y1", "y2", "cx", "cy", "r", "rx", "ry", "d", "points", "fill", "stroke", "stroke-width", "paint-order", "font-size", "font-family", "text-anchor", "marker-end", "id", "transform", "stroke-dasharray", "markerWidth", "markerHeight", "refX", "refY", "orient"]);
+    const attrs = new Set(["viewBox", "width", "height", "x", "y", "dx", "dy", "x1", "x2", "y1", "y2", "cx", "cy", "r", "rx", "ry", "d", "points", "fill", "stroke", "stroke-width", "paint-order", "font-size", "font-family", "text-anchor", "marker-end", "id", "transform", "stroke-dasharray", "markerWidth", "markerHeight", "refX", "refY", "orient"]);
     for (const node of [...parsed.querySelectorAll("*")]) {
       if (!allowed.has(node.localName)) { node.remove(); continue; }
       for (const attr of [...node.attributes]) {
@@ -796,6 +802,7 @@
     $("seg-proto").classList.toggle("is-active", visualKind === "prototype");
     $("seg-diag").classList.toggle("is-active", visualKind === "diagram");
     $("visual-toolbar").hidden = !anyArtifact;
+    $("diagram-controls").hidden = visualKind !== "diagram" || !artifact;
     $("visual-version").hidden = !artifact;
     $("visual-version").textContent = artifact ? `v${artifact.version}` : "";
     $("visual-stale").hidden = !artifact?.stale;
@@ -864,6 +871,24 @@
       $("visual-status").textContent = error.message;
     }
   }
+  function setDiagramScale(value, floor = 0.25) {
+    if (!diagramBaseSize) return;
+    diagramScale = Math.min(3, Math.max(floor, value));
+    const svg = $("artifact-holder").querySelector("svg");
+    if (svg) {
+      svg.style.width = `${diagramBaseSize.width * diagramScale}px`;
+      svg.style.height = `${diagramBaseSize.height * diagramScale}px`;
+    }
+    $("diagram-zoom-level").textContent = `${Math.round(diagramScale * 100)}%`;
+  }
+  function fitDiagram() {
+    if (!diagramBaseSize) return;
+    const holder = $("artifact-holder");
+    const availableWidth = Math.max(1, holder.clientWidth - 36);
+    const availableHeight = Math.max(1, holder.clientHeight - 28);
+    setDiagramScale(Math.min(2.5, availableWidth / diagramBaseSize.width, availableHeight / diagramBaseSize.height), 0.05);
+    holder.scrollTo({ top: 0, left: 0 });
+  }
   async function loadDiagram() {
     if (loadedDiagramVersion === state?.diagram?.version && $("artifact-holder").querySelector("svg")) return;
     try {
@@ -871,9 +896,14 @@
       if (!response.ok) throw new Error(response.status === 404 ? "No diagram yet. Generate one to inspect it." : `Diagram request failed (${response.status})`);
       const text = await response.text();
       const svg = safeSvg(text);
-      if (svg.viewBox.baseVal.width > 960)
-        svg.style.minWidth = `${svg.viewBox.baseVal.width}px`;
+      diagramBaseSize = { width: svg.viewBox.baseVal.width, height: svg.viewBox.baseVal.height };
+      diagramScale = 1;
+      svg.style.width = `${diagramBaseSize.width}px`;
+      svg.style.height = `${diagramBaseSize.height}px`;
+      svg.style.maxWidth = "none";
+      svg.style.maxHeight = "none";
       $("artifact-holder").replaceChildren(svg);
+      $("diagram-zoom-level").textContent = "100%";
       if (diagramUrl) URL.revokeObjectURL(diagramUrl);
       diagramUrl = URL.createObjectURL(new Blob([text], { type: "image/svg+xml" }));
       loadedDiagramVersion = state?.diagram?.version ?? null;
@@ -1050,7 +1080,9 @@
     if (!state) return;
     const focusKey = document.activeElement?.dataset?.focusKey || "";
     topicTitle = safeText(state.topic) || "Decision interview";
-    $("topic-title").textContent = topicTitle;
+    $("topic-title").textContent = expandedTopic ? topicTitle : shortTopic(topicTitle);
+    $("topic-title").title = topicTitle;
+    $("topic-title").setAttribute("aria-expanded", String(expandedTopic));
     $("topic-note").textContent = safeText(state.note);
     $("topic-note").hidden = !safeText(state.note).trim();
     renderSegment();
@@ -1314,6 +1346,37 @@
   $("seg-visual").addEventListener("click", () => { view = "visual"; render(); void loadSelectedArtifact(); });
   $("seg-proto").addEventListener("click", () => switchVisualKind("prototype"));
   $("seg-diag").addEventListener("click", () => switchVisualKind("diagram"));
+  $("topic-title").addEventListener("click", () => {
+    expandedTopic = !expandedTopic;
+    $("topic-title").textContent = expandedTopic ? topicTitle : shortTopic(topicTitle);
+    $("topic-title").setAttribute("aria-expanded", String(expandedTopic));
+  });
+  $("diagram-zoom-in").addEventListener("click", () => setDiagramScale(diagramScale * 1.2));
+  $("diagram-zoom-out").addEventListener("click", () => setDiagramScale(diagramScale / 1.2));
+  $("diagram-fit").addEventListener("click", fitDiagram);
+  $("diagram-reset").addEventListener("click", () => {
+    setDiagramScale(1);
+    $("artifact-holder").scrollTo({ top: 0, left: 0 });
+  });
+  const diagramHolder = $("artifact-holder");
+  diagramHolder.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !diagramHolder.querySelector("svg")) return;
+    diagramPan = { x: event.clientX, y: event.clientY, left: diagramHolder.scrollLeft, top: diagramHolder.scrollTop };
+    diagramHolder.classList.add("is-panning");
+    diagramHolder.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  diagramHolder.addEventListener("pointermove", (event) => {
+    if (!diagramPan) return;
+    diagramHolder.scrollLeft = diagramPan.left + diagramPan.x - event.clientX;
+    diagramHolder.scrollTop = diagramPan.top + diagramPan.y - event.clientY;
+  });
+  const stopDiagramPan = () => {
+    diagramPan = null;
+    diagramHolder.classList.remove("is-panning");
+  };
+  diagramHolder.addEventListener("pointerup", stopDiagramPan);
+  diagramHolder.addEventListener("pointercancel", stopDiagramPan);
   $("gen-proto").addEventListener("click", () => { visualKindPinned = true; visualKind = "prototype"; renderVisual(); generateVisual("prototype"); });
   $("gen-diag").addEventListener("click", () => { visualKindPinned = true; visualKind = "diagram"; renderVisual(); generateVisual("diagram"); });
   $("gen-kind").addEventListener("click", () => generateVisual(visualKind));
@@ -1382,6 +1445,7 @@
   document.addEventListener("click", () => {
     if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission();
   }, { once: true });
+  window.addEventListener("blur", stopDiagramPan);
   refresh();
   setInterval(refresh, 1800);
 })();
