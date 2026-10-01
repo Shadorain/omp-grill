@@ -4,6 +4,41 @@ Run design interviews with [OMP](https://github.com/can1357/oh-my-pi) in your br
 
 ![Task board interview](docs/interview.png)
 
+<details>
+<summary>More screenshots — prototypes, diagrams, notes, exports, and terminal</summary>
+
+### Interactive prototypes
+
+Try screen flows in a sandboxed preview, then send feedback to redraw them.
+
+![Interactive task board prototype with local controls and visual feedback](docs/prototype.png)
+
+### System diagrams
+
+Explore architecture and flows without turning every interview into a screen design.
+
+![System diagram connecting the browser, Grill server, session store, and OMP agent](docs/diagram.png)
+
+### Shared interview context
+
+Keep the goal, vocabulary, facts, and risks alongside the questions.
+
+![Notes drawer with the interview goal, glossary, and verified facts](docs/notes.png)
+
+### Decision reports and exports
+
+Finish locally, then export Markdown, ADRs, a beads graph, SVG, or HTML.
+
+![Finished interview report with the ADR export format and destination directory](docs/report.png)
+
+### Session terminal
+
+The current terminal inspector supports option selection, written answers, messages, and defer conditions.
+
+![Terminal inspector showing a staged answer, its rationale, and current keyboard shortcuts](docs/tui.png)
+
+</details>
+
 Requires OMP 18.4.4 or later. Restart OMP after installing or updating.
 
 ## Install
@@ -22,9 +57,11 @@ Start an interview with `/grill <topic>` or `/grill tui <topic>`. To let the age
 3. Click **Send N to agent**, or press Cmd/Ctrl+Enter, to send your drafts together.
 4. Click **Finish** to save the interview as `report.md`.
 
-Explore, Defer, Reopen, and visual requests reach the agent immediately rather than waiting for Send. Defer asks for an optional "revisit when" condition shown in the report's Deferred section. The tab title shows a `(N)` badge while the turn is yours, and the page can ask to send a desktop notification when the agent releases the turn in a hidden tab.
+Explore, Defer, Reopen, and visual requests reach the agent immediately rather than waiting for Send. Defer asks for an optional "revisit when" condition shown in the report's Deferred section. The tab title shows a `(N)` badge while the turn is yours. On supported secure browser origins (such as localhost), you can grant desktop notification permission for agent replies while the tab is hidden.
 
 You can keep several interviews open. Use `/grill use <id>` to select the one that commands and agent replies should target.
+
+Saved interviews are shared across a repository's linked worktrees. Export paths stay relative to the checkout where the interview was started. `/grill fork` creates a new interview carrying prior context, not prior questions or answers; use `/grill resume` to restore an unfinished interview.
 
 | Command | Description |
 | --- | --- |
@@ -39,20 +76,19 @@ You can keep several interviews open. Use `/grill use <id>` to select the one th
 | `/grill answer <id> -- <text>` | Record a written answer. |
 | `/grill reply <id> <text>` | Send a message about a question. |
 | `/grill pause` | Pause the selected interview. |
-| `/grill resume` | Resume a paused or errored interview. |
-| `/grill history` | View a finished interview. |
+| `/grill resume [id]` | Resume a paused or errored interview. |
+| `/grill history [id]` | View a finished interview. |
+| `/grill sessions` | List saved interviews for this repository. |
 | `/grill finish` | Finish the interview and save its report. |
-| `/grill export <kind> [path]` | Write `report`, `adr`, `beads`, `diagram`, or `prototype` into the project (kinds autocomplete). Needs a finished interview; add `--force` to overwrite. `adr` writes one numbered record per durable decision into `docs/adr`; `beads` writes a plan you apply with `bd create --graph <file>`. |
+| `/grill export <kind> [path] [--force]` | Export `report`, `adr`, `beads`, `diagram`, or `prototype` from a finished interview. Kinds autocomplete; `--force` permits overwriting. |
 | `/grill fork [id]` | Start a separate interview seeded with a finished interview's intent, glossary, facts, and risks. |
 | `/grill config` | Show settings; `/grill config <key> <value>` sets one. Keys and values autocomplete. |
 
 Run `/grill` to list open interviews and commands. Tab completion suggests commands, interview IDs, questions, and options.
 
-In the browser's Report drawer, choose an export format and press Export. The path is optional; ADRs use a directory, while the other formats use a file. Unavailable formats are disabled. ADRs include recorded decisions and considered options, without inferred consequences. Beads plans retain an explicit `https://linear.app/<workspace>/issue/<ID>` URL from the interview topic as the parent epic's `external_ref`; a bare ticket ID is not enough to infer the workspace.
+In the browser's Report drawer, choose an export format and press Export. The path is optional; ADRs use a directory, while the other formats use a file. Unavailable formats are disabled. ADRs become numbered `docs/adr/NNNN-slug.md` records, with recorded decisions and considered options but no inferred consequences. Beads defaults to `docs/grill-beads.json`; import it from your project with `bd create --graph docs/grill-beads.json`. Plans retain an explicit `https://linear.app/<workspace>/issue/<ID>` URL from the interview topic as the parent epic's `external_ref`; a bare ticket ID is not enough to infer the workspace.
 
 If an agent turn stops, the page shows its error and keeps the saved batch. Run `/grill resume` in the owning OMP session to retry it. Resuming an attached error keeps the same page URL; finished interviews are excluded from resume.
-
-![Task board prototype](docs/prototype.png)
 
 The Visual view can show a system diagram or an interactive screen prototype. Prototypes run in a sandbox, so clicking inside one does not call the agent. Use diagrams for flows and architecture, and prototypes to explore a screen design.
 
@@ -63,8 +99,6 @@ Prototype labels and displayed text update as you edit their inputs, without los
 ### `/grill tui`
 
 Prefer the terminal? Run `/grill tui` to open the selected interview inside your OMP session. The browser remains available, so you can use either view.
-
-![Session terminal](docs/tui.png)
 
 Use `j`/`k` to move between questions and `a`-`d` to stage an option. Press `i` to write an answer (the only way to answer a question with no options), `m` to write a discussion message, and `x` to defer with an optional "revisit when" condition; `enter` saves, `esc` discards. Press `enter` to send, `e` to explore, or `f` twice to finish. Use `tab` to view the discussion and `esc` or `q` to close the inspector. Closing the inspector leaves the interview open.
 
@@ -121,6 +155,7 @@ git clone https://github.com/Shadorain/omp-grill.git
 cd omp-grill
 bun install
 bun test
+bun run typecheck
 bun run demo
 ```
 
