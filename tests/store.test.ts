@@ -404,4 +404,110 @@ describe("durable grill store", () => {
     expect(next.state.context.risks[0]?.mitigation).toBe("Row-level security");
     expect(next.state.questions).toEqual([]);
   });
+  test("stores multi-select answers through pending, reload, history, compaction, and reports", () => {
+    const { store } = fixture();
+    const question: QuestionInput = {
+      id: "multi",
+      title: "Capabilities",
+      options: [
+        { id: "a", label: "Alpha" },
+        { id: "b", label: "Beta" },
+        { id: "c", label: "Gamma" },
+      ],
+      multiSelect: true,
+      recommendation: { options: ["c", "a"], reason: "Flexible" },
+    };
+    store.publish({ questions: [question] });
+    const first = store.submit([{ type: "answer", q: "multi", options: ["c", "a"], text: "Both are useful" }]);
+    expect(first.actions).toEqual([{ type: "answer", q: "multi", options: ["a", "c"], text: "Both are useful" }]);
+    expect(JSON.parse(compactSubmission(store.state, first)).questions.find((row: { id: string }) => row.id === "multi").multiSelect).toBe(true);
+    const resumed = loadStore(store.dir, "alice");
+    expect(resumed.state.pending?.actions).toEqual(first.actions);
+    expect(JSON.parse(compactState(resumed.state)).questions.find((row: { id: string }) => row.id === "multi").multiSelect).toBe(true);
+    resumed.acknowledge(first.seq);
+    const second = resumed.submit([{ type: "answer", q: "multi", options: ["b"], text: "Changed" }]);
+    expect(resumed.state.questions.find((row) => row.id === "multi")?.history?.[0]?.answer).toEqual({ options: ["a", "c"], text: "Both are useful" });
+    resumed.acknowledge(second.seq);
+    const historical = loadStore(store.dir, "alice");
+    expect(historical.state.questions.find((row) => row.id === "multi")?.history?.[0]?.answer).toEqual({ options: ["a", "c"], text: "Both are useful" });
+    historical.finish();
+    const report = readFileSync(join(historical.dir, "report.md"), "utf8");
+    expect(report).toContain("Recommended options: Alpha; Gamma");
+    expect(report).toContain("Decision: Beta");
+    expect(report).toContain("Rejected options: Alpha; Gamma");
+  });
+
+  test("keeps empty multi-select drafts and rejects invalid submissions and publications atomically", () => {
+    const { store } = fixture();
+    const question: QuestionInput = {
+      id: "multi",
+      title: "Capabilities",
+      options: [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }],
+      multiSelect: true,
+      recommendation: { option: "a", reason: "Core choice" },
+    };
+    store.publish({ questions: [question] });
+    const draft = store.saveDrafts({ revision: 0, answers: { multi: { options: [] } } });
+    expect(draft.answers.multi).toEqual({ options: [] });
+    expect(loadStore(store.dir, "alice").state.drafts.answers.multi).toEqual({ options: [] });
+    const before = JSON.stringify(store.state);
+    for (const answer of [
+      { options: [] },
+      { options: ["unknown"] },
+      { options: ["a", "a"] },
+      { option: "a", options: ["b"] },
+      { option: "a" },
+    ]) {
+      expect(() => store.submit([{ type: "answer", q: "multi", ...answer }])).toThrow();
+      expect(JSON.stringify(store.state)).toBe(before);
+    }
+    expect(() => store.publish({
+      questions: [{
+        ...question,
+        recommendation: { options: ["a", "a"], reason: "Bad" },
+      }],
+    })).toThrow();
+    expect(JSON.stringify(store.state)).toBe(before);
+    expect(() => store.publish({ questions: [{ ...question, multiSelect: false }] })).toThrow();
+    expect(JSON.stringify(store.state)).toBe(before);
+  });
+
+  test("recovers complete multi-select drafts and permits a written answer with no picks", () => {
+    const { store } = fixture();
+    store.publish({ questions: [{
+      id: "multi", title: "Capabilities", multiSelect: true,
+      options: [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }],
+      recommendation: { options: ["a", "b"], reason: "Combine capabilities." },
+    }] });
+    store.saveDrafts({ revision: 0, answers: { multi: { options: ["b", "a"], text: "Keep both" } } });
+    store.saveDrafts({ revision: 1, answers: { multi: null } });
+    const resumed = loadStore(store.dir, "alice");
+    const recovered = resumed.state.drafts.recovery.at(-1)!.answer!;
+    expect(recovered).toEqual({ options: ["a", "b"], text: "Keep both" });
+    resumed.saveDrafts({ revision: 2, answers: { multi: recovered } });
+    const submitted = resumed.submit([{ type: "answer", q: "multi", options: ["b", "a"], text: "Keep both" }], { draftRevision: 3 });
+    expect(resumed.state.drafts.answers.multi).toBeUndefined();
+    resumed.acknowledge(submitted.seq);
+    resumed.submit([{ type: "answer", q: "multi", options: [], text: "Neither; use a custom capability." }]);
+    expect(resumed.state.questions.find((question) => question.id === "multi")!.answer).toEqual({
+      options: [], text: "Neither; use a custom capability.",
+    });
+  });
+
+  test("preserves single-select answers and rejects multi-select payloads for them", () => {
+    const { store } = fixture();
+    expect(store.submit([{ type: "answer", q: "q1", option: "sqlite", text: "Simple" }]).actions).toEqual([
+      { type: "answer", q: "q1", option: "sqlite", text: "Simple" },
+    ]);
+    const root = store.dir;
+    const reloaded = loadStore(root, "alice");
+    expect(reloaded.state.pending?.actions[0]).toEqual({ type: "answer", q: "q1", option: "sqlite", text: "Simple" });
+    reloaded.acknowledge(reloaded.state.pending!.seq);
+    expect(() => reloaded.submit([{ type: "answer", q: "q1", options: ["sqlite"] }])).toThrow("single-select");
+    expect(() => reloaded.publish({ questions: [{
+      id: "single", title: "One choice",
+      options: [{ id: "a", label: "Alpha" }],
+      recommendation: { options: ["a"], reason: "Wrong mode." },
+    }] })).toThrow("single-select");
+  });
 });

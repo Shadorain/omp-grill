@@ -1,3 +1,4 @@
+import { selectedOptions } from "./answers.ts";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { replaceTabs, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
 import type { GrillState } from "./types.ts";
@@ -52,7 +53,7 @@ function dot(theme: GrillTheme): string {
 
 export function grillView(state: GrillState | undefined) {
   if (!state) return undefined;
-  const staged = Object.values(state.drafts.answers).filter((draft) => draft?.option || draft?.text?.trim()).length
+  const staged = Object.values(state.drafts.answers).filter((draft) => selectedOptions(draft).length || draft?.text?.trim()).length
     + Object.values(state.drafts.threads).filter((text) => text?.trim()).length;
   return { state, staged };
 }
@@ -140,12 +141,16 @@ export class GrillInspector implements Component {
       `${rail} ${[paint(theme, "accent", state.topic), paint(theme, "text", `${answered}/${questions.length}`), paint(theme, "dim", state.status)].join(dot(theme))}`,
       width,
     );
+    const currentQuestion = questions[this.selected];
+    const multiSelectHint = currentQuestion?.multiSelect
+      ? "Select all that apply; letters toggle"
+      : "a-d stage";
     const keys = paint(
       theme,
       "dim",
       this.editing
         ? `${EDIT_PROMPT[this.editing.kind]}  enter save  esc cancel`
-        : "j/k  a-d stage  i write  m message  enter send  e explore  x defer  f finish  tab thread  esc",
+        : `j/k  ${multiSelectHint}  i write  m message  enter send  e explore  x defer  f finish  tab thread  esc`,
     );
     const lines = [header, clip(`  ${keys}`, width)];
     if (this.note) lines.push(clip(`  ${paint(theme, "warning", this.note)}`, width));
@@ -166,9 +171,9 @@ export class GrillInspector implements Component {
     for (const [offset, item] of questions.slice(start, start + listCap).entries()) {
       const index = start + offset;
       const cursor = index === this.selected ? glyph(theme, "nav.cursor", "❯") : " ";
-      const mark = item.status === "answered" ? paint(theme, "success", "✓") : item.status === "deferred" ? paint(theme, "warning", "later") : paint(theme, "dim", "open");
       const draft = state.drafts.answers[item.id];
-      const staged = draft?.option || draft?.text?.trim() ? paint(theme, "accent", " · staged") : "";
+      const mark = item.status === "answered" ? paint(theme, "success", "✓") : item.status === "deferred" ? paint(theme, "warning", "later") : paint(theme, "dim", "open");
+      const staged = draft?.option || draft?.options !== undefined || draft?.text?.trim() ? paint(theme, "accent", " · staged") : "";
       const tone = index === this.selected ? "accent" : "text";
       lines.push(clip(`${cursor} ${paint(theme, "dim", `Q${index + 1}`)}  ${paint(theme, tone, item.title)}  ${mark}${staged}`, width));
     }
@@ -179,10 +184,12 @@ export class GrillInspector implements Component {
     lines.push("");
     lines.push(clip(`  ${paint(theme, "text", question.title)}`, width));
     if (question.body) lines.push(clip(`  ${paint(theme, "dim", question.body)}`, width));
+    const recommendedOptions = selectedOptions(question.recommendation);
+    const answer = state.drafts.answers[question.id] ?? question.answer;
     question.options.forEach((option, index) => {
       const letter = LETTERS[index] ?? "?";
-      const recommended = question.recommendation.option === option.id;
-      const chosen = state.drafts.answers[question.id]?.option === option.id || (!state.drafts.answers[question.id] && question.answer?.option === option.id);
+      const recommended = recommendedOptions.includes(option.id);
+      const chosen = selectedOptions(answer).includes(option.id);
       const pill = recommended ? `  ${paint(theme, "accent", "RECOMMENDED")}` : "";
       const mark = chosen ? paint(theme, "success", " ✓") : "";
       lines.push(clip(`  ${paint(theme, chosen ? "accent" : "text", letter.toUpperCase())}  ${option.label}${pill}${mark}`, width));
@@ -191,7 +198,7 @@ export class GrillInspector implements Component {
       const label = this.editing.kind === "defer" ? "Revisit when" : ">";
       lines.push(clip(`  ${paint(theme, "accent", label)} ${this.editing.buffer}${paint(theme, "accent", "▌")}`, width));
     } else {
-      const written = (state.drafts.answers[question.id]?.text ?? question.answer?.text ?? "").trim();
+      const written = (answer?.text ?? "").trim();
       if (written) lines.push(clip(`  ${paint(theme, "dim", "Written:")} ${written}`, width));
       else if (!question.options.length)
         lines.push(clip(`  ${paint(theme, "muted", "Press i to write an answer")}`, width));
@@ -246,7 +253,7 @@ export class GrillInspector implements Component {
       if (data === "i" || data === "m") {
         const kind = data === "i" ? "answer" : "thread";
         const existing = kind === "answer"
-          ? state.drafts.answers[question.id]?.text ?? question.answer?.text ?? ""
+          ? (state.drafts.answers[question.id] ?? question.answer)?.text ?? ""
           : state.drafts.threads[question.id] ?? "";
         this.editing = { kind, buffer: existing };
         this.view = kind === "thread" ? "discussion" : "questions";

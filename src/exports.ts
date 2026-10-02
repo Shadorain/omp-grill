@@ -1,3 +1,4 @@
+import { selectedOptions } from "./answers";
 import type { GrillState, Question } from "./types";
 
 /** An exported file: a project-relative path and the bytes to write there. */
@@ -38,19 +39,21 @@ export function renderAdrs(state: GrillState, dir: string, used: number[]): Expo
 }
 
 function adrBody(state: GrillState, question: Question): string {
-  const chosen = labelOf(question, question.answer?.option) ?? question.answer?.text ?? "";
+  const selected = selectedOptions(question.answer);
+  const chosenLabels = selected.map((id) => labelOf(question, id) ?? id);
+  const chosen = chosenLabels.join(", ");
   const lines = [`# ${question.title}`, ""];
   const context = question.body ?? state.context.intent;
   if (context) lines.push(context, "");
-  const rationale = question.answer?.option ? question.answer.text : undefined;
-  lines.push(`We chose ${chosen}. ${rationale ?? question.recommendation.reason}`.trim(), "");
+  const rationale = selected.length ? question.answer?.text : undefined;
+  lines.push(`We chose ${chosen || question.answer?.text || "(recorded)"}. ${rationale ?? question.recommendation.reason}`.trim(), "");
 
-  const rejected = question.options.filter((option) => option.id !== question.answer?.option);
-  if (question.answer?.option && rejected.length) {
+  const rejected = question.options.filter((option) => !selected.includes(option.id));
+  if (selected.length && question.options.length && (question.multiSelect || rejected.length)) {
     lines.push("## Considered Options", "");
     for (const option of question.options) {
       const exploration = question.explore?.find((row) => row.option === option.id);
-      const verdict = option.id === question.answer?.option ? "Chosen" : "Rejected";
+      const verdict = selected.includes(option.id) ? "Chosen" : "Rejected";
       lines.push(`- **${option.label}** (${verdict})`);
       if (exploration?.pros.length) lines.push(`  - For: ${exploration.pros.join("; ")}`);
       if (exploration?.cons.length) lines.push(`  - Against: ${exploration.cons.join("; ")}`);
@@ -94,7 +97,7 @@ export function renderBeadsPlan(state: GrillState): string {
       labels: deferred ? ["grill", "deferred"] : ["grill"],
       description: deferred
         ? `Deferred during the interview.${question.deferUntil ? ` Revisit when ${question.deferUntil}` : ""}`
-        : `Decision: ${labelOf(question, question.answer?.option) ?? question.answer?.text ?? "(recorded)"}`,
+        : `Decision: ${selectedOptions(question.answer).map((id) => labelOf(question, id) ?? id).join(", ") || question.answer?.text || "(recorded)"}`,
       ...(design ? { design } : {}),
       ...(deferred ? { status: "blocked" } : {}),
     });
@@ -113,11 +116,12 @@ export function renderBeadsPlan(state: GrillState): string {
 
 function beadsDesign(question: Question): string {
   const parts: string[] = [];
+  const selected = selectedOptions(question.answer);
   if (question.body) parts.push(question.body);
-  if (question.answer?.option && question.answer.text) parts.push(`Rationale: ${question.answer.text}`);
-  const rejected = question.options.filter((option) => option.id !== question.answer?.option);
-  if (question.answer?.option && rejected.length)
-    parts.push(`Rejected: ${rejected.map((option) => option.label).join("; ")}`);
+  if (selected.length && question.answer?.text) parts.push(`Rationale: ${question.answer.text}`);
+  if (selected.length) parts.push(`Chosen: ${selected.map((id) => labelOf(question, id) ?? id).join("; ")}`);
+  const rejected = question.options.filter((option) => !selected.includes(option.id));
+  if (selected.length && rejected.length) parts.push(`Rejected: ${rejected.map((option) => option.label).join("; ")}`);
   return parts.join("\n\n");
 }
 

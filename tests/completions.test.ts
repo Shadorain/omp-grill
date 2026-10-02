@@ -35,6 +35,13 @@ describe("grill command completions", () => {
     expect(grillCompletions("answer color -", snapshot)?.[0]?.label).toBe("--");
   });
 
+  test("completes additional multi-select IDs without offering already picked choices", () => {
+    const multi = { ...snapshot, questions: snapshot.questions.map((question) => ({ ...question, multiSelect: true })) };
+    expect(grillCompletions("answer color blue,", multi)?.map((item) => item.value)).toEqual(["answer color blue,purple "]);
+    expect(grillCompletions("answer color blue,p", multi)?.map((item) => item.value)).toEqual(["answer color blue,purple "]);
+    expect(grillCompletions("answer color blue,", snapshot)).toBeNull();
+  });
+
   test("completes finished and paused sessions separately", () => {
     expect(grillCompletions("history ", snapshot)?.map((item) => item.label)).toEqual(["Old board · fin11111"]);
     expect(grillCompletions("resume ", snapshot)?.map((item) => item.label)).toEqual(["Paused one · pau22222"]);

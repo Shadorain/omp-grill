@@ -71,6 +71,27 @@ describe("grill status widget", () => {
 });
 
 describe("grill session TUI", () => {
+
+  test("multi-select inspector marks every recommended and selected option with a clear toggle hint", () => {
+    const current = state();
+    const question = current.questions[0]!;
+    question.multiSelect = true;
+    question.recommendation = { options: ["blue", "purple"], reason: "Use both accents." };
+    question.answer = { options: ["blue", "purple"], text: "Both are needed." };
+    question.status = "answered";
+    const inspector = new GrillInspector(
+      () => current,
+      { close() {}, stage() {}, write() {}, send() {}, finish() {}, explore() {}, defer() {} },
+      () => 40, theme, { matches: () => false },
+    );
+    const output = inspector.render(200).join("\n");
+    expect(output).toContain("Select all that apply; letters toggle");
+    for (const label of ["Blue", "Purple"]) {
+      const line = output.split("\n").find((row) => row.includes(label));
+      expect(line).toContain("RECOMMENDED");
+      expect(line).toContain("✓");
+    }
+  });
   test("pending submissions block new actions but allow staging and resume after acknowledgement", () => {
     const home = mkdtempSync(join(tmpdir(), "omp-grill-inspector-"));
     try {

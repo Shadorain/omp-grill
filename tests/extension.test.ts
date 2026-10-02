@@ -26,6 +26,7 @@ async function fixture(allowAgentStart?: boolean, modelRegistry?: Pick<Extension
   let command: any;
   let queued = false;
   const urls: string[] = [];
+  let inspector: { handleInput(data: string): void; render(width: number): string[] } | undefined;
   const notices: string[] = [];
   const messages: any[] = [];
   const handoffs = new EventTarget();
@@ -66,6 +67,14 @@ async function fixture(allowAgentStart?: boolean, modelRegistry?: Pick<Extension
       },
       setStatus() {},
       setWidget() {},
+      custom(factory: any) {
+        inspector = factory(
+          { requestRender() {}, terminal: { rows: 50 } },
+          { fg: (_tone: string, text: string) => text },
+          { matches: () => false },
+          () => {},
+        );
+      },
     },
   } as unknown as ExtensionContext;
   grillExtension(pi as unknown as ExtensionAPI);
@@ -91,6 +100,11 @@ async function fixture(allowAgentStart?: boolean, modelRegistry?: Pick<Extension
     messages,
     event: (name: string, event = {}): Promise<unknown> => events.get(name)(event, ctx),
     setQueued(value: boolean) { queued = value; },
+    async inspector() {
+      (ctx as { hasUI: boolean }).hasUI = true;
+      await command.handler("tui", ctx);
+      return inspector!;
+    },
     waitForSubmission: () => new Promise<void>((resolve) => handoffs.addEventListener("submission", () => resolve(), { once: true })),
 
   };
@@ -251,6 +265,54 @@ const questions = [{
   options: [{ id: "modal", label: "Modal" }, { id: "page", label: "Page" }],
   recommendation: { option: "modal", reason: "Keeps the board visible." },
 }];
+
+test("multi-select command replaces the complete selection and retains notes", async () => {
+  const app = await fixture();
+  await app.command("Combined choices");
+  await app.publish({ questions: [{ ...questions[0], multiSelect: true, recommendation: { options: ["modal", "page"], reason: "Both can coexist." } }] });
+  const url = app.urls.at(-1)!;
+  await app.command("answer q1 page,modal Keep both");
+  let state = await request(url);
+  expect(state.questions[0].answer).toEqual({ options: ["modal", "page"], text: "Keep both" });
+  expect(JSON.parse(app.messages.at(-1).content).questions[0].multiSelect).toBe(true);
+  await app.publish({ handled: state.pending.seq });
+  await app.command("answer q1 page Only page now");
+  state = await request(url);
+  expect(state.questions[0].answer).toEqual({ options: ["page"], text: "Only page now" });
+  expect(state.questions[0].history.at(-1).answer.options).toEqual(["modal", "page"]);
+});
+
+test("terminal multi-select toggles preserve picks through notes and cleared drafts", async () => {
+  const app = await fixture();
+  await app.command("Combined choices");
+  await app.publish({ questions: [{ ...questions[0], multiSelect: true }] });
+  const url = app.urls.at(-1)!;
+  const inspector = await app.inspector();
+  inspector.handleInput("a");
+  inspector.handleInput("b");
+  inspector.handleInput("i");
+  inspector.handleInput("Keep both");
+  inspector.handleInput("\r");
+  expect((await request(url)).drafts.answers.q1).toEqual({ options: ["modal", "page"], text: "Keep both" });
+  inspector.handleInput("\r");
+  const sent = await request(url);
+  expect(sent.questions[0].answer.options).toEqual(["modal", "page"]);
+  await app.publish({ handled: sent.pending.seq });
+  inspector.handleInput("a");
+  inspector.handleInput("b");
+  inspector.handleInput("i");
+  for (const _ of "Keep both") inspector.handleInput("\u007f");
+  inspector.handleInput("\r");
+  expect((await request(url)).drafts.answers.q1).toEqual({ options: [] });
+  expect(inspector.render(200).join("\n")).not.toContain("Written: Keep both");
+  inspector.handleInput("i");
+  inspector.handleInput("\r");
+  expect((await request(url)).drafts.answers.q1).toEqual({ options: [] });
+  inspector.handleInput("b");
+  expect((await request(url)).drafts.answers.q1).toEqual({ options: ["page"] });
+  inspector.handleInput("\r");
+  expect((await request(url)).questions[0].answer).toEqual({ options: ["page"] });
+});
 
 test("command-only mode hides tools, rejects agent starts, and restores tools on resume", async () => {
   const app = await fixture();

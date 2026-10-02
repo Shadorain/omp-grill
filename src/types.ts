@@ -3,6 +3,7 @@ import type { ExportKind } from "./exports";
 export type QuestionStatus = "open" | "answered" | "deferred";
 export interface DraftAnswer {
   option?: string;
+  options?: string[];
   text?: string;
 }
 export interface DraftRecovery {
@@ -76,13 +77,14 @@ export interface Question {
   title: string;
   body?: string;
   options: { id: string; label: string }[];
-  recommendation: { option?: string; reason: string };
+  multiSelect?: boolean;
+  recommendation: { option?: string; options?: string[]; reason: string };
   dependsOn?: string[];
   durable?: boolean;
   status: QuestionStatus;
   /** What must change before a deferred question is worth revisiting. */
   deferUntil?: string;
-  answer?: { option?: string; text?: string };
+  answer?: DraftAnswer;
   thread: { role: "user" | "agent"; text: string }[];
   explore?: { option: string; pros: string[]; cons: string[] }[];
   history?: { at: string; reason: string; answer: DraftAnswer }[];
@@ -93,7 +95,7 @@ export type QuestionInput = Omit<
   "status" | "deferUntil" | "thread" | "history" | "recommendationUpdated"
 >;
 export type Action =
-  | { type: "answer"; q: string; option?: string; text?: string }
+  | ({ type: "answer"; q: string } & DraftAnswer)
   | { type: "thread"; q: string; text: string }
   | { type: "explore"; q: string }
   | { type: "defer"; q: string; until?: string }

@@ -23,6 +23,7 @@ import { type ExportFile, type ExportKind, renderAdrs, renderBeadsPlan } from ".
 import { renderPrototype, validatePrototypeSpec } from "./prototype";
 import { workspaceRoot } from "./workspace";
 import { actionRole } from "./messages";
+import { sameAnswer } from "./answers";
 const SPECIALIST_ROLE_IDS = ["discussion", "diagram", "prototype"] as const;
 
 const MAX_ACTIONS = 100;
@@ -87,7 +88,12 @@ function isQuestionInput(value: unknown): value is QuestionInput {
     !isRecord(value.recommendation) ||
     typeof value.recommendation.reason !== "string" ||
     (value.recommendation.option !== undefined &&
-      typeof value.recommendation.option !== "string")
+      typeof value.recommendation.option !== "string") ||
+    (value.recommendation.options !== undefined &&
+      (!Array.isArray(value.recommendation.options) ||
+        !value.recommendation.options.every((id) => typeof id === "string"))) ||
+    (value.recommendation.option !== undefined &&
+      value.recommendation.options !== undefined)
   )
     return false;
   if (
@@ -138,7 +144,10 @@ function isQuestion(value: unknown): value is Question {
     answer !== undefined &&
     (!isRecord(answer) ||
       (answer.option !== undefined &&
-        typeof answer.option !== "string") ||
+        (typeof answer.option !== "string" || answer.options !== undefined)) ||
+      (answer.options !== undefined &&
+        (!Array.isArray(answer.options) ||
+          !answer.options.every((id) => typeof id === "string"))) ||
       (answer.text !== undefined && typeof answer.text !== "string"))
   )
     return false;
@@ -155,12 +164,17 @@ function isAction(action: unknown): action is Action {
     return action.kind === undefined || action.kind === "diagram" || action.kind === "prototype";
   if (action.type === "visual-feedback")
     return typeof action.text === "string" && (action.kind === undefined || action.kind === "diagram" || action.kind === "prototype");
-  if (typeof action.q !== "string") return false;
   if (action.type === "answer")
     return (
       (action.option === undefined || typeof action.option === "string") &&
+      (action.options === undefined ||
+        (Array.isArray(action.options) &&
+          action.options.every((id) => typeof id === "string"))) &&
+      !(action.option !== undefined && action.options !== undefined) &&
       (action.text === undefined || typeof action.text === "string") &&
-      (action.option !== undefined || action.text !== undefined)
+      (action.option !== undefined ||
+        action.options !== undefined ||
+        action.text !== undefined)
     );
   if (action.type === "thread") return typeof action.text === "string";
   if (action.type === "defer")
@@ -186,14 +200,18 @@ function parseActions(value: unknown): Action[] {
       actions.push({ type: raw.type, text: raw.text, ...(raw.kind === undefined ? {} : { kind: raw.kind }) });
       continue;
     }
-    validText(raw.q, "question id", 200);
     if (raw.type === "answer") {
       if (raw.option !== undefined) validText(raw.option, "option id", 200);
+      if (raw.options !== undefined) {
+        if (raw.options.length > 4) fail("Invalid option selection");
+        raw.options.forEach((id) => validText(id, "option id", 200));
+      }
       if (raw.text !== undefined) validText(raw.text, "answer text");
       actions.push({
         type: "answer",
         q: raw.q,
         ...(raw.option === undefined ? {} : { option: raw.option }),
+        ...(raw.options === undefined ? {} : { options: raw.options }),
         ...(raw.text === undefined ? {} : { text: raw.text }),
       });
     } else if (raw.type === "thread") {
@@ -324,21 +342,23 @@ function validateQuestions(questions: Question[]): void {
       if (options.has(option.id)) fail(`Duplicate option id: ${option.id}`);
       options.add(option.id);
     }
+    if (q.multiSelect !== undefined && typeof q.multiSelect !== "boolean")
+      fail(`Invalid selection mode for ${q.id}`);
+    if (q.recommendation.option !== undefined && !options.has(q.recommendation.option))
+      fail(`Unknown recommendation for ${q.id}`);
+    if (q.recommendation.options !== undefined)
+      q.recommendation.options = validateSelection(q.recommendation.options, q, "recommendation");
+    validText(q.recommendation.reason, "recommendation reason");
     if (
       q.recommendation.option !== undefined &&
-      !options.has(q.recommendation.option)
+      q.recommendation.options !== undefined
     )
-      fail(`Unknown recommendation for ${q.id}`);
-    validText(q.recommendation.reason, "recommendation reason");
+      fail(`Mixed recommendation for ${q.id}`);
+    if (q.recommendation.options !== undefined && !q.multiSelect)
+      fail(`Multi-select recommendation for single-select question ${q.id}`);
     if (q.status === "answered") {
-      if (
-        !q.answer ||
-        (q.answer.option === undefined && q.answer.text === undefined)
-      )
-        fail(`Answered question lacks decision: ${q.id}`);
-      if (q.answer.option !== undefined && !options.has(q.answer.option))
-        fail(`Invalid answer option for ${q.id}`);
-      if (q.answer.text !== undefined) validText(q.answer.text, "answer text");
+      if (!q.answer) fail(`Answered question lacks decision: ${q.id}`);
+      q.answer = validateAnswer(q.answer, q, true);
     } else if (q.answer !== undefined)
       fail(`Unanswered question has decision: ${q.id}`);
     if (!Array.isArray(q.thread)) fail(`Invalid thread for ${q.id}`);
@@ -385,6 +405,65 @@ function validateQuestions(questions: Question[]): void {
   }
   for (const id of byId.keys()) visit(id);
 }
+function validateSelection(
+  values: unknown,
+  question: Question,
+  label: string,
+): string[] {
+  if (!Array.isArray(values) || values.length > question.options.length)
+    fail(`Invalid ${label} for ${question.id}`);
+  const selected = new Set<string>();
+  for (const id of values) {
+    validText(id, "option id", 200);
+    if (selected.has(id)) fail(`Duplicate ${label} option for ${question.id}`);
+    if (!question.options.some((option) => option.id === id))
+      fail(`Unknown ${label} option for ${question.id}`);
+    selected.add(id);
+  }
+  return question.options.filter((option) => selected.has(option.id)).map((option) => option.id);
+}
+function validateAnswer(
+  answer: unknown,
+  question: Question,
+  submitted: boolean,
+): DraftAnswer {
+  if (!isRecord(answer) || (answer.option !== undefined && answer.options !== undefined))
+    fail(`Invalid answer for ${question.id}`);
+  if (question.multiSelect) {
+    if (answer.option !== undefined) fail(`Single option answer for multi-select question ${question.id}`);
+    const options = answer.options === undefined
+      ? undefined
+      : validateSelection(answer.options, question, "answer");
+    if (answer.text !== undefined) {
+      if (typeof answer.text !== "string" || answer.text.length > MAX_TEXT)
+        fail(`Invalid answer text for ${question.id}`);
+      if (submitted) validText(answer.text, "answer text");
+    }
+    if (submitted && (!options?.length && !answer.text?.trim()))
+      fail(`Answer lacks decision: ${question.id}`);
+    return {
+      ...(options === undefined ? {} : { options }),
+      ...(answer.text === undefined ? {} : { text: answer.text }),
+    };
+  }
+  if (answer.options !== undefined) fail(`Multi-select answer for single-select question ${question.id}`);
+  if (answer.option !== undefined) {
+    validText(answer.option, "option id", 200);
+    if (!question.options.some((option) => option.id === answer.option))
+      fail(`Unknown option for ${question.id}`);
+  }
+  if (answer.text !== undefined) {
+    if (typeof answer.text !== "string" || answer.text.length > MAX_TEXT)
+      fail(`Invalid answer text for ${question.id}`);
+    if (submitted) validText(answer.text, "answer text");
+  }
+  if (submitted && answer.option === undefined && !answer.text?.trim())
+    fail(`Answer lacks decision: ${question.id}`);
+  return {
+    ...(answer.option === undefined ? {} : { option: answer.option }),
+    ...(answer.text === undefined ? {} : { text: answer.text }),
+  };
+}
 
 function report(state: GrillState): string {
   const lines = [`# Grill report: ${state.topic}`, "", `Project: ${state.project}`, `Session: ${state.id}`, `Created: ${state.createdAt}`, ""];
@@ -407,13 +486,16 @@ function report(state: GrillState): string {
     if (q.body) lines.push(q.body, "");
     lines.push(`Status: ${q.status}`, `Recommendation: ${q.recommendation.reason}`);
     if (q.recommendation.option) lines.push(`Recommended option: ${q.options.find((option) => option.id === q.recommendation.option)?.label ?? q.recommendation.option}`);
+    if (q.recommendation.options?.length) lines.push(`Recommended options: ${q.recommendation.options.map((id) => q.options.find((option) => option.id === id)?.label ?? id).join("; ")}`);
     if (q.durable) lines.push("Durable decision: Yes");
     if (q.answer) {
-      const chosen = q.answer.option ? (q.options.find((option) => option.id === q.answer!.option)?.label ?? q.answer.option) : undefined;
-      lines.push(`Decision: ${chosen ?? q.answer.text ?? "(no answer text)"}`);
-      if (q.answer.text && chosen) lines.push(`Rationale: ${q.answer.text}`);
-      if (q.answer.option !== undefined) {
-        const rejected = q.options.filter((option) => option.id !== q.answer!.option);
+      const selectedIds = q.answer.options ?? (q.answer.option ? [q.answer.option] : []);
+      const chosen = selectedIds.map((id) => q.options.find((option) => option.id === id)?.label ?? id);
+      lines.push(`Decision: ${chosen.length ? chosen.join("; ") : q.answer.text ?? "(no answer text)"}`);
+      if (q.answer.text && chosen.length) lines.push(`Rationale: ${q.answer.text}`);
+      if (selectedIds.length) {
+        const selected = new Set(selectedIds);
+        const rejected = q.options.filter((option) => !selected.has(option.id));
         if (rejected.length) lines.push(`Rejected options: ${rejected.map((option) => option.label).join("; ")}`);
       }
     } else if (q.status === "deferred") lines.push("Decision: Deferred");
@@ -492,7 +574,7 @@ export function compactSubmission(
       title: q.title,
       body: q.body,
       options: q.options,
-      recommendation: q.recommendation,
+      multiSelect: q.multiSelect,
       dependsOn: q.dependsOn,
       status: q.status,
       answer: q.answer,
@@ -532,7 +614,7 @@ export function compactSubmission(
             facts: state.context.facts.slice(-20),
             risks: state.context.risks.slice(-20),
             assumptions: state.questions.filter((question) => question.status !== "answered")
-              .map((question) => ({ id: question.id, title: question.title, recommendation: question.recommendation, options: question.options, status: question.status })),
+              .map((question) => ({ id: question.id, title: question.title, recommendation: question.recommendation, options: question.options, multiSelect: question.multiSelect, status: question.status })),
             decisions: state.questions.filter((question) => question.status === "answered" && question.answer)
               .map((question) => ({ id: question.id, title: question.title, answer: question.answer })),
           },
@@ -565,13 +647,14 @@ export function compactSubmission(
 export function compactState(state: GrillState): string {
   const questions = state.questions.map((q) =>
     q.status === "answered"
-      ? { id: q.id, title: q.title, status: q.status, answer: q.answer }
+      ? { id: q.id, title: q.title, status: q.status, multiSelect: q.multiSelect, answer: q.answer }
       : {
           id: q.id,
           title: q.title,
           status: q.status,
           body: q.body,
           options: q.options,
+          multiSelect: q.multiSelect,
           recommendation: q.recommendation,
           dependsOn: q.dependsOn,
           durable: q.durable,
@@ -745,16 +828,16 @@ function buildStore(dir: string, state: GrillState): Store {
               delete next.drafts.threads[key];
             }
           } else if (kind === "answer") {
-            if (!isRecord(value) || (value.option !== undefined && typeof value.option !== "string") || (value.text !== undefined && typeof value.text !== "string") || (value.option === undefined && value.text === undefined)) fail(`Invalid answer draft for ${key}`);
-            if (value.option !== undefined && !next.questions.find((question) => question.id === key)!.options.some((option) => option.id === value.option)) fail(`Unknown option for ${key}`);
-            if (value.text !== undefined && value.text.length > MAX_TEXT) fail("Invalid draft answer text");
-            next.drafts.answers[key] = clone(value as DraftAnswer);
+            const question = next.questions.find((item) => item.id === key)!;
+            if (!isRecord(value) || (value.option === undefined && value.options === undefined && value.text === undefined))
+              fail(`Invalid answer draft for ${key}`);
+            next.drafts.answers[key] = validateAnswer(value, question, false);
           } else {
             if (typeof value !== "string" || value.length > MAX_TEXT) fail("Invalid thread draft");
             next.drafts.threads[key] = value;
           }
+          }
         }
-      }
       next.drafts.recovery = recovery.slice(-50);
       next.drafts.revision++;
       save(next);
@@ -829,8 +912,10 @@ function buildStore(dir: string, state: GrillState): Store {
           if (existing?.status === "answered") continue;
           const questionRecommendationChanged =
             existing !== undefined &&
-            (existing.recommendation.option !== incoming.recommendation.option ||
-              existing.recommendation.reason !== incoming.recommendation.reason);
+            (JSON.stringify([...(existing.recommendation.options ?? (existing.recommendation.option ? [existing.recommendation.option] : []))].sort()) !==
+              JSON.stringify([...(incoming.recommendation.options ?? (incoming.recommendation.option ? [incoming.recommendation.option] : []))].sort()) ||
+              existing.recommendation.reason !== incoming.recommendation.reason ||
+              existing.multiSelect !== incoming.multiSelect);
           recommendationChanged ||= questionRecommendationChanged;
           const value = clone(incoming);
           delete value.answer;
@@ -906,6 +991,11 @@ function buildStore(dir: string, state: GrillState): Store {
       if (recommendationChanged && next.diagram && patch.diagram === undefined) next.diagram.stale = true;
       if (recommendationChanged && next.prototype && patch.prototype === undefined) next.prototype.stale = true;
       validateQuestions(next.questions);
+      for (const [id, draft] of Object.entries(next.drafts.answers)) {
+        const question = next.questions.find((item) => item.id === id);
+        if (!question) fail(`Unknown draft question: ${id}`);
+        next.drafts.answers[id] = validateAnswer(draft, question, false);
+      }
       if (!next.pending) next.status = "waiting";
       save(next);
     },
@@ -939,9 +1029,10 @@ function buildStore(dir: string, state: GrillState): Store {
         const q = next.questions.find((item) => item.id === action.q);
         if (!q) fail(`Unknown question: ${action.q}`);
         if (action.type === "answer") {
-          if (action.option !== undefined && !q.options.some((option) => option.id === action.option)) fail(`Unknown option for ${q.id}`);
+          const answer = validateAnswer(action, q, true);
           if (q.answer) q.history = [...(q.history ?? []), { at: new Date().toISOString(), reason: "changed", answer: clone(q.answer) }];
-          q.answer = { ...(action.option === undefined ? {} : { option: action.option }), ...(action.text === undefined ? {} : { text: action.text }) };
+          q.answer = answer;
+          if (answer.options !== undefined) action.options = answer.options;
           q.status = "answered";
         } else if (action.type === "thread") q.thread.push({ role: "user", text: action.text });
         else if (action.type === "defer" || action.type === "reopen") {
@@ -962,10 +1053,9 @@ function buildStore(dir: string, state: GrillState): Store {
       next.lastSubmission = submission;
       if (options?.draftRevision !== undefined) {
         for (const action of actions) {
-          // Senders trim text and drop empty fields; compare drafts the same way so sent drafts clear.
           if (action.type === "answer") {
             const draft = next.drafts.answers[action.q];
-            if (draft && (draft.option || undefined) === action.option && (draft.text?.trim() || undefined) === (action.text?.trim() || undefined)) delete next.drafts.answers[action.q];
+            if (draft && sameAnswer(draft, action)) delete next.drafts.answers[action.q];
           } else if (action.type === "thread" && next.drafts.threads[action.q]?.trim() === action.text.trim()) delete next.drafts.threads[action.q];
         }
         next.drafts.revision++;
@@ -1209,5 +1299,20 @@ export function loadStore(dir: string, owner: string): Store {
   if (state.status === "finished" && !state.reportPath)
     fail("Finished session lacks report");
   validateQuestions(state.questions);
+  for (const [id, draft] of Object.entries(state.drafts.answers)) {
+    const question = state.questions.find((item) => item.id === id);
+    if (!question) fail(`Unknown draft question: ${id}`);
+    state.drafts.answers[id] = validateAnswer(draft, question, false);
+  }
+  for (const submission of [state.pending, state.lastSubmission]) {
+    if (!submission) continue;
+    for (const action of submission.actions) {
+      if (action.type !== "answer") continue;
+      const question = state.questions.find((item) => item.id === action.q);
+      if (!question) fail(`Unknown question: ${action.q}`);
+      const answer = validateAnswer(action, question, true);
+      if (answer.options !== undefined) action.options = answer.options;
+    }
+  }
   return buildStore(dir, state);
 }

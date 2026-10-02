@@ -85,7 +85,7 @@ Restart OMP after installing or updating. Then start an interview:
 ```
 
 1. Open the URL OMP prints. Keep it private. The full URL contains an access token.
-2. Pick an option or write your own answer. Add a discussion message if you want to question the recommendation.
+2. Pick an option or write your own answer. Questions marked **Select all that apply** let you toggle several choices; other questions remain single-select. Add a discussion message if you want to question the recommendation.
 3. Click **Send N to agent**, or press Cmd/Ctrl+Enter. Answers and messages autosave locally as drafts. Batch several together instead of starting a model turn for every edit.
 4. Click **Finish** to save `report.md` in the local interview folder. Use Export to copy it into your project.
 
@@ -117,6 +117,8 @@ Configure separate discussion, diagram, and prototype models with `/grill config
 The browser tab title counts open questions while it is your turn. On supported secure origins, such as localhost, you can allow desktop notifications for replies while the tab is hidden.
 
 Drafts survive reloads and resume. If two tabs edit the same drafts, the page lets you choose which copy to keep. The other copy remains recoverable.
+
+Multi-select picks and notes save together. Changing an answered question replaces the entire selection; clearing every pick stays an editable draft and cannot be sent without a written answer.
 
 If an agent turn stops, the page keeps the batch and shows the error. Run `/grill resume` in the owning OMP session to retry it. An attached interview keeps its URL.
 
@@ -163,7 +165,7 @@ Run `/grill tui` for the selected interview, or `/grill tui <topic>` to start on
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move between questions. |
-| `a` through `d` | Stage an option. |
+| `a` through `d` | Stage an option; toggle independent choices on multi-select questions. |
 | `i` | Write an answer, including questions with no options. |
 | `m` | Write a discussion message. |
 | `x` | Defer with an optional revisit condition. |
@@ -192,6 +194,7 @@ Run `/grill` to list open interviews and commands. Tab completion suggests comma
 | `/grill url` | Show its private URL. |
 | `/grill questions` | List its questions. |
 | `/grill answer <id> <option> [note]` | Record an option and optional note. |
+| `/grill answer <id> <option1,option2> [note]` | Record multiple choices on a multi-select question; no spaces between IDs. |
 | `/grill answer <id> -- <text>` | Record a written answer. |
 | `/grill reply <id> <text>` | Send a message about a question. |
 | `/grill pause` | Pause the selected interview. |

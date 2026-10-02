@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GrillState, PrototypeBlock, PrototypeSpec, Publish, QuestionInput } from "../src/types.ts";
+import { selectedOptions } from "../src/answers.ts";
 
 // Exercise the real OMP extension without sending requests to a model provider.
 const project = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -38,6 +39,18 @@ const questions: QuestionInput[] = [
     ],
     recommendation: { option: "modal", reason: "The short form fits in a modal and preserves board context." },
   },
+  {
+    id: "notifications",
+    title: "Which task events should notify the team?",
+    body: "Select all that apply. Pick several events, deselect any, and add a note before sending.",
+    multiSelect: true,
+    options: [
+      { id: "assigned", label: "Task assigned" },
+      { id: "blocked", label: "Task blocked" },
+      { id: "completed", label: "Task completed" },
+    ],
+    recommendation: { options: ["assigned", "blocked"], reason: "Notify on actionable changes; completion can stay in the activity feed." },
+  },
 ];
 function prototype(current: GrillState, feedback?: string): PrototypeSpec {
   const page = current.questions.find((question) => question.id === "creation")?.answer?.option === "page";
@@ -60,7 +73,7 @@ function prototype(current: GrillState, feedback?: string): PrototypeSpec {
   ];
   const assumptions = current.questions.filter((question) => question.status === "open");
   if (assumptions.length)
-    board.push({ id: "assumed-choices", kind: "text", text: `Assumed until answered: ${assumptions.map((question) => `${question.title}: ${question.options.find((option) => option.id === question.recommendation.option)?.label ?? "undecided"}`).join("; ")}` });
+    board.push({ id: "assumed-choices", kind: "text", text: `Assumed until answered: ${assumptions.map((question) => `${question.title}: ${question.options.filter((option) => selectedOptions(question.recommendation).includes(option.id)).map((option) => option.label).join(", ") || "undecided"}`).join("; ")}` });
   if (feedback)
     board.push({ id: "feedback-update", kind: "text", text: `Requested change (scripted demo): ${feedback}` });
   if (!page)

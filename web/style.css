@@ -359,6 +359,17 @@ a { color: var(--blue); }
 .opt-meta { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .opt-check { display: none; color: var(--purple); font-weight: 700; }
 .is-chosen .opt-check { display: inline; }
+.opt-row.is-multi .opt-check {
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: transparent;
+  font-size: 12px;
+}
+.opt-row.is-multi.is-chosen .opt-check { border-color: var(--purple); background: var(--purple); color: var(--bg); }
 .tag {
   font-family: var(--mono);
   font-size: 12px;

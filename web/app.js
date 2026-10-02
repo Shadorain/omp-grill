@@ -133,33 +133,54 @@
     $("sync-note").textContent = localWarning || (conflict ? "Conflict needs a choice" : saving || dirty ? "Saving…" : "");
   }
   function hasDraft(value) {
-    return !!(value && (safeText(value.text).trim() || safeText(value.option).trim()));
+    return !!(value && (safeText(value.text).trim() || safeText(value.option).trim() || (Array.isArray(value.options) && value.options.length)));
   }
-  // Canonical draft shape: omit empty fields, drop empty drafts. The server rejects `option: ""`.
+  function hasStoredDraft(value) {
+    return !!(value && (hasDraft(value) || Array.isArray(value.options)));
+  }
+  function answerOptions(question, answer) {
+    if (Array.isArray(answer?.options)) return question.options.filter((option) => answer.options.includes(option.id)).map((option) => option.id);
+    return answer?.option ? [answer.option] : [];
+  }
+  function answerBase(q) { return draftAnswers[q.id] ?? q.answer ?? {}; }
   function setAnswerDraft(id, value) {
+    const question = state?.questions?.find((item) => item.id === id);
     const option = safeText(value?.option);
+    const options = Array.isArray(value?.options)
+      ? (question?.options || []).map((item) => item.id).filter((optionId) => value.options.includes(optionId))
+      : null;
     const text = safeText(value?.text);
-    if (option || text) draftAnswers[id] = { ...(option ? { option } : {}), ...(text ? { text } : {}) };
+    if (options) draftAnswers[id] = { options, ...(text ? { text } : {}) };
+    else if (option || text) draftAnswers[id] = { ...(option ? { option } : {}), ...(text ? { text } : {}) };
     else delete draftAnswers[id];
   }
   // A staged answer identical to the recorded one is not a change; drop it.
   function reconcileDraft(q) {
     const draft = draftAnswers[q.id];
     if (!q.answer || !draft) return;
-    if ((draft.option || "") === (q.answer.option || "") && (draft.text || "") === (q.answer.text || "")) delete draftAnswers[q.id];
+    const selected = answerOptions(q, draft);
+    const recorded = answerOptions(q, q.answer);
+    if (selected.length === recorded.length && selected.every((id) => recorded.includes(id)) && (draft.text || "").trim() === (q.answer.text || "").trim()) delete draftAnswers[q.id];
   }
-  // On an answered question the recorded values are the base; an answer action
-  // replaces the recorded answer wholesale, so edits must carry it forward.
   function stageOption(q, optionId) {
-    const base = { ...(q.answer || {}), ...(draftAnswers[q.id] || {}) };
-    setAnswerDraft(q.id, { ...base, option: base.option === optionId ? "" : optionId });
+    const base = answerBase(q);
+    if (q.multiSelect) {
+      const selected = answerOptions(q, base);
+      const next = selected.includes(optionId) ? selected.filter((id) => id !== optionId) : [...selected, optionId];
+      const options = (q.options || []).map((option) => option.id).filter((id) => next.includes(id));
+      setAnswerDraft(q.id, { options, text: base.text });
+    } else {
+      setAnswerDraft(q.id, { ...base, option: base.option === optionId ? "" : optionId });
+    }
     reconcileDraft(q);
     markDirty();
     renderQuestion();
   }
   function stageText(q, text) {
-    const base = { ...(q.answer || {}), ...(draftAnswers[q.id] || {}) };
-    setAnswerDraft(q.id, { ...base, text });
+    const base = answerBase(q);
+    setAnswerDraft(q.id, q.multiSelect
+      ? { options: answerOptions(q, base), text }
+      : { ...base, text });
     reconcileDraft(q);
     markDirty();
   }
@@ -286,7 +307,7 @@
   function stashDraftSet(drafts, reason) {
     const rows = localRecovery();
     for (const [q, value] of Object.entries(drafts.answers || {})) {
-      if (hasDraft(value)) rows.push({ kind: "answer", q, option: safeText(value.option), text: safeText(value.text), reason });
+      if (hasStoredDraft(value)) rows.push({ kind: "answer", q, ...(Array.isArray(value.options) ? { options: value.options.slice() } : { option: safeText(value.option) }), text: safeText(value.text), reason });
     }
     for (const [q, text] of Object.entries(drafts.threads || {})) {
       if (safeText(text).trim()) rows.push({ kind: "thread", q, text, reason });
@@ -307,7 +328,8 @@
         const restore = document.createElement("button");
         restore.type = "button";
         restore.className = "restore-item";
-        restore.textContent = `Restore ${item.kind}: ${state?.questions?.find((q) => q.id === item.q)?.title || item.q}`;
+        const question = state?.questions?.find((q) => q.id === item.q);
+        restore.textContent = `Restore ${item.kind}: ${question?.title || item.q}${item.kind === "answer" ? ` · ${formatAnswer(question || { options: [] }, item)}` : ""}`;
         restore.title = item.reason || "Recoverable draft";
         restore.addEventListener("click", () => {
           if (item.kind === "answer") setAnswerDraft(item.q, item);
@@ -325,7 +347,8 @@
         const restore = document.createElement("button");
         restore.type = "button";
         restore.className = "restore-item";
-        restore.textContent = `Restore ${item.kind}: ${state?.questions?.find((q) => q.id === item.q)?.title || item.q}`;
+        const question = state?.questions?.find((q) => q.id === item.q);
+        restore.textContent = `Restore ${item.kind}: ${question?.title || item.q}${item.kind === "answer" ? ` · ${formatAnswer(question || { options: [] }, item.answer || item)}` : ""}`;
         restore.title = `Server recovery ${item.at || ""}`.trim();
         restore.addEventListener("click", () => {
           if (item.kind === "answer") {
@@ -349,9 +372,10 @@
     const actions = [];
     for (const q of state?.questions || []) {
       const draft = drafts.answers[q.id];
-      if (!hasDraft(draft)) continue;
+      if (!draft || !(hasDraft(draft) && (!Array.isArray(draft.options) || draft.options.length || safeText(draft.text).trim()))) continue;
       const action = { type: "answer", q: q.id };
-      if (draft.option) action.option = draft.option;
+      if (Array.isArray(draft.options)) action.options = draft.options.slice();
+      else if (draft.option) action.option = draft.option;
       if (safeText(draft.text).trim()) action.text = draft.text.trim();
       actions.push(action);
     }
@@ -385,12 +409,12 @@
     const questions = state?.questions || [];
     $("progress-count").textContent = `${questions.filter((q) => q.status !== "open").length} / ${questions.length}`;
     const nav = $("question-nav");
-    rebuild(nav, [selected, questions.map((q) => [q.id, q.title, q.status, draftAnswers[q.id]?.option || "", hasDraft(draftAnswers[q.id]), q.answer?.option || ""])], () => {
+    rebuild(nav, [selected, questions.map((q) => [q.id, q.title, q.status, draftAnswers[q.id]?.option || "", draftAnswers[q.id]?.options || [], hasStoredDraft(draftAnswers[q.id]), q.answer?.option || "", q.answer?.options || []])], () => {
       for (const [index, q] of questions.entries()) {
         const draft = draftAnswers[q.id];
         const row = document.createElement("button");
         row.type = "button";
-        row.className = `qrow${q.id === selected ? " is-selected" : ""}${q.status === "answered" && !hasDraft(draft) ? " is-answered" : ""}${q.status === "deferred" && !hasDraft(draft) ? " is-deferred" : ""}`;
+        row.className = `qrow${q.id === selected ? " is-selected" : ""}${q.status === "answered" && !hasStoredDraft(draft) ? " is-answered" : ""}${q.status === "deferred" && !hasStoredDraft(draft) ? " is-deferred" : ""}`;
         row.dataset.focusKey = `question:${q.id}`;
         const qid = document.createElement("span");
         qid.className = "qid mono";
@@ -400,11 +424,11 @@
         title.textContent = safeText(q.title) || "Untitled question";
         const mark = document.createElement("span");
         mark.className = "qmark mono";
-        if (hasDraft(draft)) {
+        if (hasStoredDraft(draft)) {
           mark.classList.add("is-staged");
           const dot = document.createElement("i");
           dot.className = "staged-dot";
-          mark.append(dot, draft.option ? ` ${optionLetter(q, draft.option)}` : "");
+          mark.append(dot, ` ${answerOptions(q, draft).map((id) => optionLetter(q, id)).join("+") || (safeText(draft.text).trim() ? "txt" : "—")}`);
           row.title = "Staged. Not sent yet.";
         } else if (q.status === "answered") {
           mark.classList.add("is-done");
@@ -412,7 +436,7 @@
           check.className = "done-check";
           check.textContent = "✓";
           const letter = document.createElement("span");
-          letter.textContent = q.answer?.option ? optionLetter(q, q.answer.option) : "txt";
+          letter.textContent = answerOptions(q, q.answer).map((id) => optionLetter(q, id)).join("+") || "txt";
           mark.append(check, letter);
           row.title = "Recorded. Click to stage a different answer.";
         } else if (q.status === "deferred") {
@@ -436,8 +460,8 @@
     $("question-title")?.focus({ preventScroll: true });
   }
   function formatAnswer(question, answer) {
-    const choice = (question.options || []).find((option) => option.id === answer?.option)?.label || answer?.option;
-    return [choice, answer?.text].filter(Boolean).join(" — ") || "Answered";
+    const choice = answerOptions(question, answer).map((id) => (question.options || []).find((option) => option.id === id)?.label || id);
+    return [choice.join(", "), answer?.text].filter(Boolean).join(" — ") || "Answered";
   }
   function renderQuestion() {
     const q = qSelected();
@@ -480,23 +504,28 @@
     $("question-body").textContent = safeText(q.body);
     $("question-body").hidden = !safeText(q.body).trim();
     const rec = q.recommendation;
-    const recLetter = rec?.option ? optionLetter(q, rec.option) : "";
+    const recOptions = answerOptions(q, rec);
+    const recLetter = recOptions.map((id) => optionLetter(q, id)).join("+");
     $("why-line").textContent = rec?.reason ? `Why ${recLetter ? `${recLetter}.` : "this."} ${rec.reason}` : "";
     $("why-line").hidden = !rec?.reason;
     const answered = q.status === "answered" && !!q.answer;
     $("change-hint").hidden = !answered;
+    $("change-hint").textContent = q.multiSelect ? "Recorded. Toggle choices to stage a change." : "Recorded. Pick another option to stage a change.";
     const draft = draftAnswers[q.id];
-    const chosen = draft?.option || (answered ? q.answer.option : "");
+    const chosen = answerOptions(q, draft ?? (answered ? q.answer : {}));
+    $("multi-hint").hidden = !q.multiSelect;
     const opts = $("options");
     const disabled = state.status === "finished";
-    rebuild(opts, [q.id, q.options, chosen, rec?.option, q.answer?.option, disabled], () => {
+    rebuild(opts, [q.id, q.options, chosen, recOptions, q.answer, q.multiSelect, disabled], () => {
       for (const option of q.options || []) {
+        const isChosen = chosen.includes(option.id);
+        const isRecommended = recOptions.includes(option.id);
         const button = document.createElement("button");
         button.type = "button";
         button.dataset.focusKey = `option:${q.id}:${option.id}`;
         button.disabled = disabled;
-        button.className = `opt-row${chosen === option.id ? " is-chosen" : ""}${rec?.option === option.id ? " is-recommended" : ""}`;
-        button.setAttribute("aria-pressed", String(chosen === option.id));
+        button.className = `opt-row${q.multiSelect ? " is-multi" : ""}${isChosen ? " is-chosen" : ""}${isRecommended ? " is-recommended" : ""}`;
+        button.setAttribute("aria-pressed", String(isChosen));
         const letter = document.createElement("span");
         letter.className = "opt-letter mono";
         letter.textContent = optionLetter(q, option.id);
@@ -505,8 +534,8 @@
         copy.textContent = safeText(option.label);
         const meta = document.createElement("span");
         meta.className = "opt-meta";
-        if (rec?.option === option.id) meta.append(tag("Recommended"));
-        if (answered && q.answer.option === option.id && chosen !== option.id) meta.append(tag("Recorded"));
+        if (isRecommended) meta.append(tag("Recommended"));
+        if (answered && answerOptions(q, q.answer).includes(option.id) && !isChosen) meta.append(tag("Recorded"));
         const check = document.createElement("span");
         check.className = "opt-check";
         check.textContent = "✓";
@@ -517,7 +546,7 @@
       }
     });
     const answerText = $("answer-text");
-    if (questionChanged || document.activeElement !== answerText) answerText.value = draft?.text ?? q.answer?.text ?? "";
+    if (questionChanged || document.activeElement !== answerText) answerText.value = (draft ?? q.answer)?.text ?? "";
     answerText.disabled = disabled;
     renderStep();
     $("defer-action").hidden = q.status !== "open";
@@ -813,8 +842,9 @@
     const open = (state?.questions || []).filter((question) => question.status === "open");
     const assumed = open.map((question) => {
       const rec = question.recommendation;
-      const choice = (question.options || []).find((option) => option.id === rec?.option)?.label;
-      return `${question.title} → ${choice ? `assumes “${choice}”` : "undecided"}`;
+      const ids = answerOptions(question, rec);
+      const choices = ids.map((id) => (question.options || []).find((option) => option.id === id)?.label || id);
+      return `${question.title} → ${choices.length ? `assumes “${choices.join(", ")}”` : "undecided"}`;
     });
     $("visual-assumed").hidden = !artifact || !open.length;
     $("visual-assumed").textContent = assumed.join(" · ");
@@ -1139,7 +1169,7 @@
             Object.assign(draftThreads, cached.threads || {});
           } else if (cached) {
             const unsynced = {
-              answers: Object.fromEntries(Object.entries(cached.answers || {}).filter(([id, value]) => hasDraft(value) && JSON.stringify(value) !== JSON.stringify(current.answers?.[id] ?? null))),
+              answers: Object.fromEntries(Object.entries(cached.answers || {}).filter(([id, value]) => hasStoredDraft(value) && JSON.stringify(value) !== JSON.stringify(current.answers?.[id] ?? null))),
               threads: Object.fromEntries(Object.entries(cached.threads || {}).filter(([id, value]) => safeText(value).trim() && value !== current.threads?.[id])),
             };
             stashDraftSet(unsynced, "Unsynced browser draft");

@@ -27,6 +27,14 @@ Keep these true when touching shared code; each has a test.
   files; they call `store` methods.
 - **Drafts use revision CAS.** A conflicting save must not destroy the other
   copy — it becomes a recovery entry (`DraftState.recovery`).
+- **Selection mode is explicit.** Omitted/false `Question.multiSelect` preserves
+  single-select `answer.option`; multi-select uses `answer.options`. IDs are
+  unique, known, and stored in question-option order. Recommendations may use
+  `options` only on multi-select questions; neither shape may mix both fields.
+- **Empty selections are drafts, not decisions.** `{ options: [] }` overrides
+  the recorded answer after deselect-all, including on reload. Read the draft
+  as a whole before falling back to the recorded answer. Send requires at least
+  one selection or nonempty text and replaces the entire previous answer.
 - **Submissions are durable before delivery.** `pending` is persisted, delivered
   on resume, acknowledged only by `handled` in a later publish. Batches are
   tracked per interview and sequence so concurrent grills can't ack each other.

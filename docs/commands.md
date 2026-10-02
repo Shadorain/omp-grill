@@ -13,6 +13,14 @@ Four touch points, all required:
 4. **Docs** — row in the README command table; detail paragraphs only when
    behavior is non-obvious.
 
+## Answering multi-select questions
+
+`/grill answer <id> <option1,option2> [note]` replaces the full recorded selection
+on a question with `multiSelect: true`. Comma-separated IDs have no spaces.
+Completion appends unselected IDs after the comma. Single-select questions keep
+their existing one-ID syntax; `-- <text>` still answers either mode in words.
+The browser and terminal inspector toggle choices locally before Send.
+
 ## Reading or changing settings
 
 Use `readServerSettings` / `writeServerSettings` (`src/settings.ts`) — never

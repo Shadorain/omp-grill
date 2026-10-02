@@ -18,7 +18,8 @@ export function createPublishSchemas(z: ExtensionAPI["zod"]) {
     questions: z.array(z.object({
       id: z.string(), title: z.string(), body: z.string().optional(),
       options: z.array(z.object({ id: z.string(), label: z.string() })),
-      recommendation: z.object({ option: z.string().optional(), reason: z.string() }),
+      multiSelect: z.boolean().describe("True for independent choices that can be combined; omit for mutually exclusive choices.").optional(),
+      recommendation: z.object({ option: z.string().optional(), options: z.array(z.string()).describe("Recommended IDs for multiSelect questions; omit option when using options.").optional(), reason: z.string() }),
       dependsOn: z.array(z.string()).optional(), durable: z.boolean().optional(),
     })).optional(),
     replies: z.array(z.object({ q: z.string(), text: z.string() })).optional(),

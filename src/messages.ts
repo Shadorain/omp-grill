@@ -1,3 +1,4 @@
+import { selectedOptions } from "./answers";
 import type { Action, GrillState, SpecialistRole, Submission } from "./types";
 
 export function actionRole(action: Action): SpecialistRole | undefined {
@@ -13,8 +14,9 @@ export function submissionSummary(state: GrillState, submission: Submission): st
     const name = question?.title ?? ("q" in action ? action.q : "");
     switch (action.type) {
       case "answer": {
-        const option = question?.options.find((option) => option.id === action.option)?.label ?? action.option;
-        lines.push(`Answer · ${name}: ${[option, action.text].filter(Boolean).join(" — ")}`);
+        const labels = selectedOptions(action)
+          .map((id) => question?.options.find((option) => option.id === id)?.label ?? id);
+        lines.push(`Answer · ${name}: ${[labels.join(", "), action.text].filter(Boolean).join(" — ")}`);
         break;
       }
       case "thread": lines.push(`Discuss · ${name}: ${action.text}`); break;

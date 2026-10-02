@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Add opt-in multi-select questions for independent choices, with checkbox toggles in the browser, letter toggles in the terminal inspector, and comma-separated `/grill answer` IDs. Preserve picks and notes through autosave, reload, edits, history, and recovery; reports, ADRs, and beads exports include every selected choice. Single-select questions remain unchanged.
 - Replace the full-width status widget with a compact colored indicator: topic, progress, and state, with an expandable full topic/status/URL. The indicator disappears after finish.
 - Add optional `discussionModel`, `diagramModel`, and `prototypeModel` settings. Those requests run through configured model selectors with narrowed structured tools while the interviewer's model still owns follow-up questions and batch acknowledgement. Persisted specialist completion skips finished work on resume.
 - Show completed specialist work to the interviewer as readable action lines instead of raw JSON; it is omitted while a specialist is still running. Keep stale visual markers outside the main payload.

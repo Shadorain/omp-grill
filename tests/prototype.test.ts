@@ -6,6 +6,8 @@ import { createStore, loadStore } from "../src/store";
 import { validatePrototypeSpec } from "../src/prototype";
 import { renderDiagram } from "../src/diagram";
 import type { PrototypeSpec, DiagramSpec } from "../src/types";
+import { renderAdrs, renderBeadsPlan } from "../src/exports";
+import { submissionSummary } from "../src/messages";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -219,5 +221,44 @@ describe("native prototype renderer", () => {
       expect(header.x + header.width).toBeLessThanOrEqual(viewWidth);
       if (index) expect(header.x).toBeGreaterThanOrEqual(headers[index - 1]!.x + headers[index - 1]!.width);
     }
+  });
+});
+
+describe("multi-select decision outputs", () => {
+  test("ADR, beads, and submission summaries retain every selected option and rationale", () => {
+    const root = mkdtempSync(join(tmpdir(), "omp-grill-multi-output-"));
+    roots.push(root);
+    const store = createStore({ home: root, owner: "alice", project: root, topic: "Accent strategy" });
+    store.publish({ questions: [{
+      id: "accents",
+      title: "Which accents?",
+      body: "Keep emphasis accessible.",
+      options: [
+        { id: "blue", label: "Blue" },
+        { id: "purple", label: "Purple" },
+        { id: "gray", label: "Gray" },
+      ],
+      multiSelect: true,
+      durable: true,
+      recommendation: { options: ["blue", "purple"], reason: "Both are clear." },
+    }] });
+    const submission = store.submit([{ type: "answer", q: "accents", options: ["blue", "purple"], text: "Differentiate links and actions." }]);
+
+    const adr = renderAdrs(store.state, "docs/adr", [])[0]!.contents;
+    expect(adr).toContain("We chose Blue, Purple.");
+    expect(adr).toContain("Differentiate links and actions.");
+    expect(adr).toContain("**Blue** (Chosen)");
+    expect(adr).toContain("**Purple** (Chosen)");
+    expect(adr).toContain("**Gray** (Rejected)");
+
+    const beads = JSON.parse(renderBeadsPlan(store.state)) as { nodes: { description?: string; design?: string }[] };
+    const task = beads.nodes.find((node) => node.design);
+    expect(task?.description).toContain("Blue, Purple");
+    expect(task?.design).toContain("Chosen: Blue; Purple");
+    expect(task?.design).toContain("Rationale: Differentiate links and actions.");
+    expect(task?.design).toContain("Rejected: Gray");
+
+    const summary = submissionSummary(store.state, submission);
+    expect(summary).toContain("Answer · Which accents?: Blue, Purple — Differentiate links and actions.");
   });
 });

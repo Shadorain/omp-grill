@@ -10,6 +10,7 @@ export interface CompletionQuestion {
   id: string;
   title: string;
   options: { id: string; label: string }[];
+  multiSelect?: boolean;
 }
 
 export interface CompletionSnapshot {
@@ -141,12 +142,14 @@ export function grillCompletions(
     if (verb !== "answer" || parts.length !== 2) return null;
     const question = snapshot.questions.find((item) => item.id === questionPrefix);
     if (!question) return null;
-    const optionPrefix = parts[1] ?? "";
+    const picked = question.multiSelect ? (parts[1] ?? "").split(",") : [parts[1] ?? ""];
+    const optionPrefix = picked.pop() ?? "";
+    const prefix = picked.length ? `${picked.join(",")},` : "";
     const options = [
-      ...(prefixMatches(optionPrefix, "--") ? [item(`answer ${question.id} -- `, "--", "Free-text answer")] : []),
+      ...(!picked.length && prefixMatches(optionPrefix, "--") ? [item(`answer ${question.id} -- `, "--", "Free-text answer")] : []),
       ...question.options
-        .filter((option) => prefixMatches(optionPrefix, option.id) || prefixMatches(optionPrefix, option.label))
-        .map((option) => item(`answer ${question.id} ${option.id} `, option.id, option.label)),
+        .filter((option) => !picked.includes(option.id) && (prefixMatches(optionPrefix, option.id) || prefixMatches(optionPrefix, option.label)))
+        .map((option) => item(`answer ${question.id} ${prefix}${option.id} `, option.id, option.label)),
     ];
     return options.length ? options : null;
   }

@@ -13,7 +13,7 @@ import { Text } from "@oh-my-pi/pi-tui";
  import { startServer } from "./server.ts";
  import { listSessions, resumeStore } from "./sessions.ts";
  import { createGrillInspector, createGrillWidget, grillWidgetTitle, type GrillTheme } from "./tui.ts";
- import type { Action, GrillServer, InterviewContext, Publish, SessionSummary, Store, Submission } from "./types.ts";
+ import type { Action, DraftAnswer, GrillServer, InterviewContext, Publish, SessionSummary, Store, Submission } from "./types.ts";
 import {
   displaySettingsPath,
   formatServerSettings,
@@ -24,6 +24,7 @@ import {
 import { createPublishSchemas } from "./publish-schema";
 import { runSpecialist } from "./models";
 import { actionRole, submissionSummary } from "./messages";
+import { sameAnswer, selectedOptions, toggleOption } from "./answers";
 import { type ExportKind, EXPORT_DEFAULTS, EXPORT_KINDS } from "./exports.ts";
 function grillHome() {
   return process.env.OMP_GRILL_HOME || join(homedir(), ".omp", "grill");
@@ -33,6 +34,7 @@ const ENTRY = "omp-grill.session";
 const instruction = `The extension owns the interview UI, durable state, event delivery, prototype interactions and reports. Never generate UI files, session JSON, polling scripts, HTML, CSS or JavaScript. Publish compact structured data, then end your turn; explicit browser sends wake this session.
 
 Publish 1-3 independent frontier questions through grill_publish. Include topic only when starting a user-requested interview. Each question has a stable id, short consequential title/body, 2-4 options {id,label}, and recommendation {option,reason} naming the real tradeoff. Free-text-only questions use empty options and omit the recommended option. dependsOn names answered prerequisites. Mark durable only when hard to reverse, surprising without context, and a real tradeoff. Record verified vocabulary, facts and risks in context {terms,facts,risks,intent}; never claim facts you did not verify. A defer action may carry until — the concrete condition that makes the question worth revisiting — shown in the report's Deferred section.
+Use multiSelect:true only when options are independent and can be combined (select all that apply). Omit it for mutually exclusive choices. Multi-select recommendations use options:[ids] rather than option; answers carry options:[ids] and optional text. Never treat omitted multi-select choices as approved.
 
 Challenge assumptions, outcomes, failure cases and tradeoffs. Research code/docs instead of asking the user for facts. Do not seek confirmation for routine implementation choices or reopen settled decisions without a conflict. Do not implement the topic during the interview.
 
@@ -220,7 +222,7 @@ export default function grillExtension(pi: ExtensionAPI) {
 /grill url              print the selected grill's private URL
 /grill questions        list the selected grill's questions
 /grill answer <id> <option> [note]
-                        record an option on the selected grill
+                        record an option, or comma-separated IDs for select-all questions
 /grill answer <id> -- <text>
                         free-text answer on the selected grill
 /grill reply <id> <text>
@@ -255,15 +257,11 @@ export default function grillExtension(pi: ExtensionAPI) {
     const state = runtime.store.state;
     const question = state.questions.find((item) => item.id === questionId);
     if (!question || state.status === "finished") return;
-    const draft = state.drafts.answers[questionId];
-    const base = { ...(question.answer ?? {}), ...(draft ?? {}) };
-    const option = base.option === optionId ? undefined : optionId;
-    const text = base.text?.trim();
-    const same = (option || "") === (question.answer?.option || "") && (text || "") === (question.answer?.text || "");
+    const draft = toggleOption(question, state.drafts.answers[questionId] ?? question.answer, optionId);
     runtime.store.saveDrafts({
       revision: state.drafts.revision,
       answers: {
-        [questionId]: same || (!option && !text) ? null : { ...(option ? { option } : {}), ...(text ? { text } : {}) },
+        [questionId]: sameAnswer(draft, question.answer) || (!question.multiSelect && !draft.option && !draft.text) ? null : draft,
       },
     });
   }
@@ -275,12 +273,15 @@ export default function grillExtension(pi: ExtensionAPI) {
       runtime.store.saveDrafts({ revision: state.drafts.revision, threads: { [questionId]: text || null } });
       return;
     }
-    const option = state.drafts.answers[questionId]?.option ?? question.answer?.option;
-    const same = (option || "") === (question.answer?.option || "") && text === (question.answer?.text || "");
+    const base = state.drafts.answers[questionId] ?? question.answer ?? {};
+    const draft: DraftAnswer = {
+      ...(question.multiSelect ? { options: selectedOptions(base) } : base.option ? { option: base.option } : {}),
+      ...(text.trim() ? { text: text.trim() } : {}),
+    };
     runtime.store.saveDrafts({
       revision: state.drafts.revision,
       answers: {
-        [questionId]: same || (!option && !text) ? null : { ...(option ? { option } : {}), ...(text ? { text } : {}) },
+        [questionId]: sameAnswer(draft, question.answer) || (!question.multiSelect && !draft.option && !draft.text) ? null : draft,
       },
     });
   }
@@ -289,11 +290,12 @@ export default function grillExtension(pi: ExtensionAPI) {
     for (const question of runtime.store.state.questions) {
       const draft = runtime.store.state.drafts.answers[question.id];
       const text = draft?.text?.trim();
-      if (draft?.option || text)
+      if (selectedOptions(draft).length || text)
         actions.push({
           type: "answer",
           q: question.id,
           ...(draft?.option ? { option: draft.option } : {}),
+          ...(draft?.options !== undefined ? { options: draft.options } : {}),
           ...(text ? { text } : {}),
         });
       const message = runtime.store.state.drafts.threads[question.id]?.trim();
@@ -484,6 +486,7 @@ export default function grillExtension(pi: ExtensionAPI) {
           id: question.id,
           title: question.title,
           options: question.options,
+          multiSelect: question.multiSelect,
         })),
       });
     },
@@ -500,7 +503,7 @@ export default function grillExtension(pi: ExtensionAPI) {
         const questions = owned(ctx).store.state.questions;
         ctx.ui.notify(questions.length
           ? questions.map((question) =>
-              `${question.id} [${question.status}] ${question.title}${question.options.length ? `\n${question.options.map((option) => `  ${option.id}: ${option.label}`).join("\n")}` : "\n  Free text: answer <id> -- <text>"}`
+              `${question.id} [${question.status}] ${question.title}${question.multiSelect ? " · Select all that apply (comma-separated IDs)" : ""}${question.options.length ? `\n${question.options.map((option) => `  ${option.id}: ${option.label}`).join("\n")}` : "\n  Free text: answer <id> -- <text>"}`
             ).join("\n\n")
           : "The agent has not published questions yet.", "info");
         return;
@@ -510,14 +513,14 @@ export default function grillExtension(pi: ExtensionAPI) {
         const answer = /^answer\s+(\S+)\s+(\S+)(?:\s+([\s\S]*))?$/.exec(command);
         const reply = /^reply\s+(\S+)\s+([\s\S]+)$/.exec(command);
         if (!answer && !reply)
-          throw new Error("Use answer <question-id> <option-id> [note], answer <question-id> -- <text>, or reply <question-id> <text>.");
+          throw new Error("Use answer <question-id> <option-id[,option-id]> [note], answer <question-id> -- <text>, or reply <question-id> <text>.");
         const submission = answer
           ? runtime.store.submit([{
               type: "answer",
               q: answer[1],
               ...(answer[2] === "--"
                 ? { text: answer[3] ?? "" }
-                : { option: answer[2], ...(answer[3] ? { text: answer[3] } : {}) }),
+                : { ...(runtime.store.state.questions.find((question) => question.id === answer[1])?.multiSelect ? { options: answer[2].split(",") } : { option: answer[2] }), ...(answer[3] ? { text: answer[3] } : {}) }),
             }])
           : runtime.store.submit([{ type: "thread", q: reply![1], text: reply![2] }]);
         await wake(runtime, submission);
