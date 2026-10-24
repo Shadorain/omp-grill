@@ -160,7 +160,9 @@ function parseQuestions(value: unknown): Question[] {
 }
 function isAction(action: unknown): action is Action {
   if (!isRecord(action) || typeof action.type !== "string") return false;
-  if (action.type === "finish" || action.type === "visualize")
+  if (action.type === "finish")
+    return action.handoff === undefined || action.handoff === true;
+  if (action.type === "visualize")
     return action.kind === undefined || action.kind === "diagram" || action.kind === "prototype";
   if (action.type === "visual-feedback")
     return typeof action.text === "string" && (action.kind === undefined || action.kind === "diagram" || action.kind === "prototype");
@@ -188,7 +190,7 @@ function parseActions(value: unknown): Action[] {
   for (const raw of value) {
     if (!isAction(raw)) fail("Invalid action");
     if (raw.type === "finish") {
-      actions.push({ type: "finish" });
+      actions.push({ type: "finish", ...(raw.handoff ? { handoff: true } : {}) });
       continue;
     }
     if (raw.type === "visualize") {

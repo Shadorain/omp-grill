@@ -57,6 +57,8 @@ function isRecordBody(value: unknown): Record<string, unknown> | undefined {
 export async function startServer(input: {
   store: Store;
   onSubmit: (submission: Submission) => void | Promise<void>;
+  /** A finishing batch completes immediately, so it never reaches `onSubmit`. */
+  onFinish?: (submission: Submission) => void;
   onChange?: () => void;
   host?: string;
   port?: number;
@@ -273,7 +275,13 @@ export async function startServer(input: {
           } catch {
             /* Status observers cannot break request handling. */
           }
-          void deliver();
+          if (input.store.state.status === "finished") {
+            try {
+              input.onFinish?.(submission);
+            } catch {
+              /* The report is already durable; a notice failure cannot undo it. */
+            }
+          } else void deliver();
         }
         respond(
           res,

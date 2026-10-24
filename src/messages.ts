@@ -25,7 +25,7 @@ export function submissionSummary(state: GrillState, submission: Submission): st
       case "reopen": lines.push(`Reopen · ${name}`); break;
       case "visualize": lines.push(`Draw · ${action.kind ?? "diagram"}`); break;
       case "visual-feedback": lines.push(`Revise · ${action.kind ?? "diagram"}: ${action.text}`); break;
-      case "finish": lines.push("Finish"); break;
+      case "finish": lines.push(action.handoff ? "Finish · hand off" : "Finish"); break;
     }
   }
   if (submission.completed?.length) lines.push(`Specialists completed: ${submission.completed.join(", ")}`);

@@ -31,7 +31,7 @@ const SUBS: { name: string; description: string; usage?: string }[] = [
   { name: "history", description: "Open a finished grill's locked page" },
   { name: "fork", description: "Start a grill carrying a finished grill's context", usage: "[id]" },
   { name: "sessions", description: "List saved grills for this project" },
-  { name: "finish", description: "Finish the selected grill and write the report" },
+  { name: "finish", description: "Finish the selected grill and write the report", usage: "[handoff]" },
   { name: "export", description: "Write an artifact into the project", usage: "<kind> [path]" },
   { name: "config", description: "Show or set server settings", usage: "[key] [value]" },
 ];
@@ -117,6 +117,10 @@ export function grillCompletions(
       .filter((grill) => prefixMatches(rest, grill.id) || prefixMatches(rest, grill.topic))
       .map((grill) => item(`use ${grill.id} `, `${grill.topic} · ${grill.id.slice(0, 8)}`, grill.status));
     return matches.length ? matches : null;
+  }
+  if (verb === "finish") {
+    if (rest.includes(" ")) return null;
+    return prefixMatches(rest, "handoff") ? [item("finish handoff", "handoff", "Finish and ask the agent to implement")] : null;
   }
   if (verb === "tui") {
     if (rest.includes(" ")) return null;

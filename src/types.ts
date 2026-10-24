@@ -102,7 +102,7 @@ export type Action =
   | { type: "reopen"; q: string }
   | { type: "visualize"; kind?: "diagram" | "prototype" }
   | { type: "visual-feedback"; kind?: "diagram" | "prototype"; text: string }
-  | { type: "finish" };
+  | { type: "finish"; handoff?: true };
 export type SpecialistRole = "discussion" | "diagram" | "prototype";
 export interface Submission {
   seq: number;

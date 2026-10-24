@@ -153,6 +153,10 @@ export default function grillExtension(pi: ExtensionAPI) {
       store: runtime.store,
       ...(another ? { port: 0 } : {}),
       onChange: status,
+      onFinish: (submission) => {
+        const last = submission.actions.at(-1);
+        announceFinish(runtime, last?.type === "finish" && !!last.handoff);
+      },
       onSubmit: (submission) => {
         if (
           !attached.has(runtime.store.state.id) ||
@@ -231,15 +235,16 @@ export default function grillExtension(pi: ExtensionAPI) {
 /grill resume           open a paused or errored grill alongside the others
 /grill history          open a finished grill's locked page alongside the others
 /grill sessions         list saved grills for this project
- /grill finish           finish the selected grill and write report.md
- /grill export <kind>    write report, adr, beads, diagram or prototype into the project
- /grill fork [id]        start a new interview carrying a finished grill's context
- /grill config           show settings; config <key> <value> sets one
- /grill tui [topic|off]  open this interview in the session terminal`;
+/grill finish [handoff] finish the selected grill and write report.md; handoff asks the agent to implement it
+/grill export <kind>    write report, adr, beads, diagram or prototype into the project
+/grill fork [id]        start a new interview carrying a finished grill's context
+/grill config           show settings; config <key> <value> sets one
+/grill tui [topic|off]  open this interview in the session terminal`;
   }
   function syncWidget(ctx: ExtensionContext) {
     if (!ctx.hasUI) return;
-    if (!runtimeOf(currentId) || runtimeOf(currentId)?.store.state.status === "finished") {
+    // The inspector draws its own header; a second widget line above the editor duplicates it.
+    if (overlayTui || !runtimeOf(currentId) || runtimeOf(currentId)?.store.state.status === "finished") {
       ctx.ui.setWidget("omp-grill", undefined);
       return;
     }
@@ -303,6 +308,21 @@ export default function grillExtension(pi: ExtensionAPI) {
     }
     return actions;
   }
+  function announceFinish(runtime: Runtime, handoff: boolean) {
+    const { id, topic, reportPath } = runtime.store.state;
+    const head = `Grill ${id} for ${JSON.stringify(topic)} is finished. Report: ${reportPath}.`;
+    pi.sendMessage({
+      customType: "omp-grill.finished",
+      content: handoff
+        ? `${head} The user handed off: read the report, then plan and implement from its recorded decisions, following the delivery workflow it records. Do not reopen settled decisions; ask only if the report leaves a blocking gap.`
+        : `${head} No action requested; wait for the user's next instruction.`,
+      details: { title: grillWidgetTitle(runtime.store.state), report: reportPath ?? "", handoff },
+      display: true,
+      attribution: "user",
+    }, handoff ? { triggerTurn: true, deliverAs: "followUp" } : { triggerTurn: false });
+    void syncTools();
+    status();
+  }
   async function wake(runtime: Runtime, submission: Submission) {
     if (runtime.specialist) return;
     const controller = new AbortController();
@@ -355,15 +375,17 @@ export default function grillExtension(pi: ExtensionAPI) {
     void wake(runtime, runtime.store.submit(actions, { draftRevision: runtime.store.state.drafts.revision }));
     return true;
   }
-  function finishRuntime(runtime: Runtime) {
+  function finishRuntime(runtime: Runtime, handoff = false) {
     if (runtime.store.state.pending)
       throw new Error("A submission still needs acknowledgement. Resume it before finishing.");
     const actions = draftActions(runtime);
     if (actions.length)
-      runtime.store.submit([...actions, { type: "finish" }], {
+      runtime.store.submit([...actions, { type: "finish", ...(handoff ? { handoff: true as const } : {}) }], {
         draftRevision: runtime.store.state.drafts.revision,
       });
-    return runtime.store.finish();
+    const report = runtime.store.finish();
+    announceFinish(runtime, handoff);
+    return report;
   }
   async function configure(ctx: ExtensionContext, command: string) {
     const rest = command === "config" ? "" : command.slice(7).trim();
@@ -411,9 +433,9 @@ export default function grillExtension(pi: ExtensionAPI) {
   async function openTui(ctx: ExtensionContext) {
     if (!ctx.hasUI) throw new Error("Session TUI needs the interactive terminal.");
     owned(ctx);
-    syncWidget(ctx);
     await ctx.ui.custom((tui, theme, keys, done) => {
       overlayTui = tui;
+      syncWidget(ctx);
       return createGrillInspector(
         () => runtimeOf(currentId)?.store.state,
         {
@@ -430,14 +452,14 @@ export default function grillExtension(pi: ExtensionAPI) {
           },
           send: () => {
             const current = runtimeOf(currentId);
-            if (current) sendDrafts(current);
+            const sent = current ? sendDrafts(current) : false;
             tui.requestRender();
+            return sent;
           },
-          finish: () => {
+          finish: (handoff) => {
             const current = runtimeOf(currentId);
             if (!current) return;
-            finishRuntime(current);
-            status();
+            finishRuntime(current, handoff);
             tui.requestRender();
           },
           explore: (questionId) => {
@@ -459,6 +481,7 @@ export default function grillExtension(pi: ExtensionAPI) {
       );
     });
     overlayTui = undefined;
+    syncWidget(ctx);
   }
 
   pi.registerCommand("grill", {
@@ -622,11 +645,10 @@ export default function grillExtension(pi: ExtensionAPI) {
         );
         return;
       }
-      if (command === "finish") {
+      if (command === "finish" || command === "finish handoff") {
         const runtime = owned(ctx);
-        const report = finishRuntime(runtime);
+        const report = finishRuntime(runtime, command === "finish handoff");
         await syncTools();
-        status();
         ctx.ui.notify(`Grill finished: ${report}`, "info");
         return;
       }
@@ -848,6 +870,8 @@ export default function grillExtension(pi: ExtensionAPI) {
       : theme.fg("accent", message.details?.summary ?? "Grill submission"), 0, 0));
   pi.registerMessageRenderer<{ title: string; url: string }>("omp-grill.ready", (message, _options, theme) =>
     new Text(`${theme.fg("success", `Grill ready · ${message.details?.title ?? ""}`)}\n${message.details?.url ?? ""}`, 0, 0));
+  pi.registerMessageRenderer<{ title: string; report: string; handoff: boolean }>("omp-grill.finished", (message, _options, theme) =>
+    new Text(`${theme.fg("success", `Grill finished · ${message.details?.title ?? ""}${message.details?.handoff ? " · handed off" : ""}`)}\n${message.details?.report ?? ""}`, 0, 0));
   pi.registerShortcut("ctrl+alt+g", {
     description: "Expand Grill status and private URL",
     handler(ctx) {

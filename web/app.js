@@ -91,7 +91,7 @@
     return questions.length > 0 && questions.every((q) => q.status !== "open") && !state?.pending && !sending;
   }
   function finishBlocked() {
-    return !state || sending || !!state.pending || ["working", "paused"].includes(state.status) || !!conflict;
+    return !state || sending || !!state.pending || ["working", "paused", "finished"].includes(state.status) || !!conflict;
   }
   function stagedCount() {
     return readyAnswers().length + readyThreads().length;
@@ -590,6 +590,11 @@
       next.dataset.mode = "open";
       next.dataset.target = firstOpen.id;
       next.textContent = "Unanswered →";
+    } else if (state.status === "finished") {
+      next.classList.add("btn-ghost");
+      next.disabled = true;
+      next.dataset.mode = "none";
+      next.textContent = "Finished";
     } else if (interviewSettled()) {
       next.classList.add("btn-primary");
       next.disabled = finishBlocked();
@@ -693,7 +698,13 @@
     const finished = state?.status === "finished";
     $("send-bar").hidden = finished;
     $("finished-bar").hidden = !finished;
-    if (finished) return;
+    if (finished) {
+      const last = state.lastSubmission?.actions?.at(-1);
+      $("finished-label").textContent = last?.type === "finish" && last.handoff
+        ? "Interview finished · report saved · handed off to the agent"
+        : "Interview finished · report saved";
+      return;
+    }
     const summary = $("staged-summary");
     const answers = readyAnswers();
     const threads = readyThreads();
@@ -1235,7 +1246,7 @@
     if (!retry) {
       const snapshots = { answers: clone(draftAnswers), threads: clone(draftThreads) };
       const clearActions = drafts ? actionsFromSnapshot(snapshots) : actions || [];
-      const outgoing = finish ? [...clearActions, { type: "finish" }] : clearActions;
+      const outgoing = finish ? [...clearActions, { type: "finish", ...(finish === "handoff" ? { handoff: true } : {}) }] : clearActions;
       if (!outgoing.length) return false;
       // Only draft-consuming sends carry the revision; others must not race autosave into a false conflict.
       const body = { actions: outgoing, requestId: uid(), ...(consumesDrafts ? { draftRevision: revision } : {}) };
@@ -1372,6 +1383,7 @@
   });
   $("cancel-finish").addEventListener("click", () => $("finish-dialog").close());
   $("confirm-finish").addEventListener("click", () => postActions(null, { finish: true, drafts: true }));
+  $("confirm-handoff").addEventListener("click", () => postActions(null, { finish: "handoff", drafts: true }));
   $("seg-questions").addEventListener("click", () => { view = "questions"; render(); });
   $("seg-visual").addEventListener("click", () => { view = "visual"; render(); void loadSelectedArtifact(); });
   $("seg-proto").addEventListener("click", () => switchVisualKind("prototype"));

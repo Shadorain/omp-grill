@@ -17,8 +17,10 @@ export interface GrillTuiActions {
   stage(questionId: string, optionId: string): void;
   /** Save answer text or a discussion message as a draft, without sending. */
   write(questionId: string, kind: "answer" | "thread", text: string): void;
-  send(): void;
-  finish(): void;
+  /** Sends every staged draft; false when nothing was staged. */
+  send(): boolean;
+  /** `handoff` asks the owning agent to implement from the report. */
+  finish(handoff: boolean): void;
   explore(questionId: string): void;
   defer(questionId: string, until?: string): void;
 }
@@ -33,6 +35,13 @@ const EDIT_PROMPT: Record<"answer" | "thread" | "defer", string> = {
   answer: "typing answer",
   thread: "typing message",
   defer: "revisit when",
+};
+const STATUS_LABEL: Record<GrillState["status"], string> = {
+  waiting: "your turn",
+  working: "agent thinking",
+  paused: "paused",
+  error: "error",
+  finished: "finished",
 };
 
 function clip(value: string, width: number): string {
@@ -113,6 +122,7 @@ export class GrillInspector implements Component {
   private view: "questions" | "discussion" = "questions";
   private confirmFinish = false;
   private note = "";
+  private help = false;
   /** Active text field, or undefined when keys act as commands. */
   private editing?: { kind: "answer" | "thread" | "defer"; buffer: string };
 
@@ -136,23 +146,37 @@ export class GrillInspector implements Component {
     this.selected = Math.max(0, Math.min(this.selected, Math.max(0, questions.length - 1)));
     const question = questions[this.selected];
     const answered = questions.filter((item) => item.status !== "open").length;
+    const staged = grillView(state)?.staged ?? 0;
     const rail = paint(theme, "accent", glyph(theme, "advisor.rail", "▎"));
+    const statusTone = state.status === "error" ? "error" : state.status === "working" ? "warning" : "dim";
     const header = clip(
-      `${rail} ${[paint(theme, "accent", state.topic), paint(theme, "text", `${answered}/${questions.length}`), paint(theme, "dim", state.status)].join(dot(theme))}`,
+      `${rail} ${[
+        paint(theme, "accent", state.topic),
+        paint(theme, "text", `${answered}/${questions.length}`),
+        paint(theme, statusTone, STATUS_LABEL[state.status]),
+        ...(staged ? [paint(theme, "accent", `${staged} staged · enter sends`)] : []),
+      ].join(dot(theme))}`,
       width,
     );
-    const currentQuestion = questions[this.selected];
-    const multiSelectHint = currentQuestion?.multiSelect
-      ? "Select all that apply; letters toggle"
-      : "a-d stage";
+    const pick = !question?.options.length ? "i write"
+      : question.multiSelect ? "letters toggle"
+      : `a-${LETTERS[question.options.length - 1]} pick`;
     const keys = paint(
       theme,
       "dim",
       this.editing
         ? `${EDIT_PROMPT[this.editing.kind]}  enter save  esc cancel`
-        : `j/k  ${multiSelectHint}  i write  m message  enter send  e explore  x defer  f finish  tab thread  esc`,
+        : this.help
+          ? "j/k move  i write answer  m message agent  tab discussion  e explore  x defer  f finish  esc close  ? less"
+          : `j/k move  ${pick}  enter send  f finish  ? more`,
     );
-    const lines = [header, clip(`  ${keys}`, width)];
+    const lines = [header];
+    if (state.status === "error") {
+      const reason = state.error || "The last batch failed.";
+      const hint = reason.includes("/grill resume") ? "" : ` ${paint(theme, "dim", "/grill resume retries it.")}`;
+      lines.push(clip(`  ${paint(theme, "error", reason)}${hint}`, width));
+    }
+    lines.push(clip(`  ${keys}`, width));
     if (this.note) lines.push(clip(`  ${paint(theme, "warning", this.note)}`, width));
     if (this.view === "discussion" && question) {
       lines.push(clip(`  ${paint(theme, "accent", question.title)}`, width));
@@ -222,6 +246,10 @@ export class GrillInspector implements Component {
       this.actions.close();
       return;
     }
+    if (data === "?") {
+      this.help = !this.help;
+      return;
+    }
     if (data === "\t") {
       this.view = this.view === "questions" ? "discussion" : "questions";
       this.confirmFinish = false;
@@ -242,6 +270,12 @@ export class GrillInspector implements Component {
     const state = this.getState();
     if (!question || !state || state.status === "finished") return;
     try {
+      if (this.confirmFinish && data === "h") {
+        this.confirmFinish = false;
+        this.actions.finish(true);
+        this.note = "Finished. Handed off to the agent.";
+        return;
+      }
       const letter = LETTERS.indexOf(data.toLowerCase());
       if (!COMMAND_KEYS[data.toLowerCase()] && letter >= 0 && letter < question.options.length && data.length === 1) {
         const option = question.options[letter];
@@ -267,8 +301,7 @@ export class GrillInspector implements Component {
         return;
       }
       if (this.keys.matches(data, "tui.select.confirm") || data === "\r" || data === "\n") {
-        this.actions.send();
-        this.note = "Sent staged answers.";
+        this.note = this.actions.send() ? "Sent staged answers." : "Nothing staged. Pick an option or press i to write first.";
         return;
       }
       if (data === "e") {
@@ -285,11 +318,15 @@ export class GrillInspector implements Component {
       if (data === "f") {
         if (!this.confirmFinish) {
           this.confirmFinish = true;
-          this.note = "Press f again to finish.";
+          this.note = "f again: finish  ·  h: finish and hand off to the agent to implement";
           return;
         }
-        this.actions.finish();
+        this.confirmFinish = false;
+        this.actions.finish(false);
+        this.note = "Finished. Report written.";
+        return;
       }
+      this.confirmFinish = false;
     } catch (error) {
       this.confirmFinish = false;
       this.note = error instanceof Error ? error.message : String(error);

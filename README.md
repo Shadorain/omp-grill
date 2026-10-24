@@ -87,7 +87,7 @@ Restart OMP after installing or updating. Then start an interview:
 1. Open the URL OMP prints. Keep it private. The full URL contains an access token.
 2. Pick an option or write your own answer. Questions marked **Select all that apply** let you toggle several choices; other questions remain single-select. Add a discussion message if you want to question the recommendation.
 3. Click **Send N to agent**, or press Cmd/Ctrl+Enter. Answers and messages autosave locally as drafts. Batch several together instead of starting a model turn for every edit.
-4. Click **Finish** to save `report.md` in the local interview folder. Use Export to copy it into your project.
+4. Click **Finish** to save `report.md` in the local interview folder. **Finish only** tells the agent the interview closed and waits for you. **Finish & hand off to agent** also starts a turn to plan and implement from the report. Use Export to copy the report into your project.
 
 Questions, replies, and visual requests use your OMP provider. The interface, draft storage, and report generation use no model tokens. Session files stay on your machine.
 
@@ -172,7 +172,8 @@ Run `/grill tui` for the selected interview, or `/grill tui <topic>` to start on
 | `Enter` / `Esc` while writing | Save or discard the edit. |
 | `Enter` outside the editor | Send drafts. |
 | `e` | Explore tradeoffs. |
-| `f` twice | Finish. |
+| `f` then `f` / `h` | Finish, or finish and hand off to the agent. |
+| `?` | Show every key. |
 | `Tab` | Switch between the question and discussion. |
 | `Esc` / `q` outside the editor | Close the inspector. The interview stays open. |
 
@@ -201,7 +202,7 @@ Run `/grill` to list open interviews and commands. Tab completion suggests comma
 | `/grill resume [id]` | Resume a paused or errored interview. |
 | `/grill history [id]` | View a finished interview. |
 | `/grill sessions` | List saved interviews for this repository. |
-| `/grill finish` | Finish and save the report. |
+| `/grill finish [handoff]` | Finish and save the report; `handoff` asks the agent to implement it. |
 | `/grill export <kind> [path] [--force]` | Export an artifact into the project. |
 | `/grill fork [id]` | Start a new interview with a finished interview's context. |
 | `/grill config [key] [value]` | Show or change settings. |

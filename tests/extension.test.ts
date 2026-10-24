@@ -29,6 +29,7 @@ async function fixture(allowAgentStart?: boolean, modelRegistry?: Pick<Extension
   let inspector: { handleInput(data: string): void; render(width: number): string[] } | undefined;
   const notices: string[] = [];
   const messages: any[] = [];
+  const deliveries: unknown[] = [];
   const handoffs = new EventTarget();
 
   const pi = {
@@ -44,8 +45,9 @@ async function fixture(allowAgentStart?: boolean, modelRegistry?: Pick<Extension
     getActiveTools: () => [...active],
     async setActiveTools(names: string[]) { active = names; },
     appendEntry(customType: string, data: unknown) { entries.push({ type: "custom", customType, data }); },
-    sendMessage(message: unknown) {
+    sendMessage(message: unknown, options?: unknown) {
       messages.push(message);
+      deliveries.push(options);
       if (message && typeof message === "object" && "customType" in message && message.customType === "omp-grill.submission")
         handoffs.dispatchEvent(new Event("submission"));
 
@@ -98,6 +100,7 @@ async function fixture(allowAgentStart?: boolean, modelRegistry?: Pick<Extension
     urls,
     notices,
     messages,
+    deliveries,
     event: (name: string, event = {}): Promise<unknown> => events.get(name)(event, ctx),
     setQueued(value: boolean) { queued = value; },
     async inspector() {
@@ -459,7 +462,7 @@ test("resume skips a finished branch entry and reopens the older paused intervie
   expect(finished.status).toBe("finished");
 });
 
-test("browser Finish writes the report and hides command-only tools", async () => {
+test("browser Finish writes the report, hides tools, and tells the agent without starting a turn", async () => {
   const app = await fixture();
   await app.command("Browser finish");
   await app.publish({ questions });
@@ -469,6 +472,30 @@ test("browser Finish writes the report and hides command-only tools", async () =
   expect((await request(url)).status).toBe("finished");
   expect(readFileSync(join(app.home, initial.id, "report.md"), "utf8")).toContain("Browser finish");
   expect(app.active()).toEqual(["read"]);
+  const index = app.messages.findIndex((message) => message.customType === "omp-grill.finished");
+  expect(app.messages[index].content).toContain(join(app.home, initial.id, "report.md"));
+  expect(app.deliveries[index]).toEqual({ triggerTurn: false });
+});
+
+test("Finish with hand-off starts an agent turn from the browser and the command", async () => {
+  const app = await fixture();
+  await app.command("Handoff page");
+  await app.publish({ questions });
+  const url = app.urls.at(-1)!;
+  await request(url, "/api/send", { actions: [{ type: "answer", q: "q1", option: "modal" }, { type: "finish", handoff: true }] });
+  const page = await request(url);
+  expect(page.status).toBe("finished");
+  expect(page.lastSubmission.actions.at(-1)).toEqual({ type: "finish", handoff: true });
+
+  await app.command("Handoff command");
+  await app.publish({ questions });
+  await app.command("finish handoff");
+  const finished = app.messages.flatMap((message, index) => message.customType === "omp-grill.finished" ? [index] : []);
+  expect(finished).toHaveLength(2);
+  for (const index of finished) {
+    expect(app.messages[index].content).toContain("handed off");
+    expect(app.deliveries[index]).toEqual({ triggerTurn: true, deliverAs: "followUp" });
+  }
 });
 
 test("unsourced verified facts pass the tool contract and persist", async () => {

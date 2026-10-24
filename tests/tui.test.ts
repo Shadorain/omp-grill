@@ -81,11 +81,10 @@ describe("grill session TUI", () => {
     question.status = "answered";
     const inspector = new GrillInspector(
       () => current,
-      { close() {}, stage() {}, write() {}, send() {}, finish() {}, explore() {}, defer() {} },
+      { close() {}, stage() {}, write() {}, send: () => false, finish() {}, explore() {}, defer() {} },
       () => 40, theme, { matches: () => false },
     );
     const output = inspector.render(200).join("\n");
-    expect(output).toContain("Select all that apply; letters toggle");
     for (const label of ["Blue", "Purple"]) {
       const line = output.split("\n").find((row) => row.includes(label));
       expect(line).toContain("RECOMMENDED");
@@ -115,6 +114,7 @@ describe("grill session TUI", () => {
           },
           send() {
             store.submit([{ type: "answer", q: question.id, ...store.state.drafts.answers[question.id] }]);
+            return true;
           },
           finish() { store.finish(); },
           explore(q) { store.submit([{ type: "explore", q }]); },
@@ -149,7 +149,7 @@ describe("grill session TUI", () => {
       const inspector = new GrillInspector(
         () => store.state,
         {
-          close() {}, stage() {}, send() {}, finish() {}, explore() {}, defer() {},
+          close() {}, stage() {}, send: () => false, finish() {}, explore() {}, defer() {},
           write(q, kind, text) {
             store.saveDrafts(kind === "thread"
               ? { revision: store.state.drafts.revision, threads: { [q]: text || null } }
@@ -184,7 +184,7 @@ describe("grill session TUI", () => {
       const inspector = new GrillInspector(
         () => store.state,
         {
-          close() {}, stage() {}, write() {}, send() {}, finish() {}, explore() {},
+          close() {}, stage() {}, write() {}, send: () => false, finish() {}, explore() {},
           defer(q, until) { store.submit([{ type: "defer", q, ...(until ? { until } : {}) }]); },
         },
         () => 40, theme, { matches: () => false },
@@ -196,5 +196,39 @@ describe("grill session TUI", () => {
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
+  });
+
+  test("f then h finishes with hand-off; f twice finishes without; other keys cancel", () => {
+    const finishes: boolean[] = [];
+    const current = state();
+    const inspector = new GrillInspector(
+      () => current,
+      { close() {}, stage() {}, write() {}, send: () => false, finish(handoff) { finishes.push(handoff); }, explore() {}, defer() {} },
+      () => 40, theme, { matches: () => false },
+    );
+    for (const key of ["f", "j", "h"]) inspector.handleInput(key);
+    expect(finishes).toEqual([]);
+    for (const key of ["f", "h"]) inspector.handleInput(key);
+    for (const key of ["f", "f"]) inspector.handleInput(key);
+    expect(finishes).toEqual([true, false]);
+  });
+
+  test("header shows staged drafts and the error reason; enter with nothing staged says so", () => {
+    const current = state();
+    current.status = "error";
+    current.error = "Agent stopped without publishing. Use /grill resume to retry the saved batch.";
+    let sends = 0;
+    const inspector = new GrillInspector(
+      () => current,
+      { close() {}, stage() {}, write() {}, send: () => { sends++; return false; }, finish() {}, explore() {}, defer() {} },
+      () => 40, theme, { matches: () => false },
+    );
+    expect(inspector.render(200).join("\n")).toContain("Agent stopped without publishing");
+    expect(inspector.render(200)[0]).not.toContain("staged");
+    inspector.handleInput("\r");
+    expect(sends).toBe(1);
+    expect(inspector.render(200).join("\n")).toContain("Nothing staged");
+    current.drafts.answers.color = { option: "purple" };
+    expect(inspector.render(200)[0]).toContain("1 staged");
   });
 });

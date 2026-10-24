@@ -125,7 +125,7 @@
       </div>
     </div>
     <div id="finished-bar" class="finished-bar" hidden>
-      <span>Interview finished &middot; report saved</span>
+      <span id="finished-label">Interview finished &middot; report saved</span>
       <button id="open-report-btn" class="btn btn-secondary" type="button">Open report</button>
     </div>
   </footer>
@@ -178,7 +178,8 @@
     <div id="finish-drafts" class="finish-drafts"></div>
     <div class="dialog-actions">
       <button id="cancel-finish" class="btn btn-secondary" type="button">Cancel</button>
-      <button id="confirm-finish" class="btn btn-primary" type="button">Finish and write report</button>
+      <button id="confirm-finish" class="btn btn-secondary" type="button" title="Write the report; the agent waits for your next instruction">Finish only</button>
+      <button id="confirm-handoff" class="btn btn-primary" type="button" title="Write the report and ask the agent to plan and implement it">Finish &amp; hand off to agent</button>
     </div>
   </dialog>
 </body>

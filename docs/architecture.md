@@ -51,7 +51,9 @@ Keep these true when touching shared code; each has a test.
 - **HTTP trust boundary.** Private fragment token on every `/api/*`, Host and
   Origin checks on POST, bounded body sizes. Pages carry no ambient auth.
 - **Finish is zero-token.** Report generation is a local render, never a model
-  call.
+  call. Finish always notifies the owning session without starting a turn;
+  only an explicit hand-off (`{ type: "finish", handoff: true }`) wakes the
+  agent to implement from the report.
 - **Tools stay hidden until needed.** `grill_publish`/`grill_state` activate on
   first open interview (or `allowAgentStart`) and deactivate after the last
   finish/pause.

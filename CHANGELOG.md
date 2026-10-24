@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Finish now tells the owning OMP session: a `Grill finished` message with the report path. Previously a browser Finish never reached the agent. **Finish & hand off to agent** (browser dialog, `f` then `h` in the terminal, `/grill finish handoff`) also starts an agent turn to plan and implement from the report. Plain Finish starts no turn. Finish and Next are disabled once the interview is finished.
+- Terminal inspector: hide the duplicate status widget while it is open, label status plainly (`your turn`, `agent thinking`), show the error reason and resume hint, show `N staged · enter sends` in the header, report when Enter has nothing to send, and shorten key hints (`?` shows the rest).
 - Add opt-in multi-select questions for independent choices, with checkbox toggles in the browser, letter toggles in the terminal inspector, and comma-separated `/grill answer` IDs. Preserve picks and notes through autosave, reload, edits, history, and recovery; reports, ADRs, and beads exports include every selected choice. Single-select questions remain unchanged.
 - Replace the full-width status widget with a compact colored indicator: topic, progress, and state, with an expandable full topic/status/URL. The indicator disappears after finish.
 - Add optional `discussionModel`, `diagramModel`, and `prototypeModel` settings. Those requests run through configured model selectors with narrowed structured tools while the interviewer's model still owns follow-up questions and batch acknowledgement. Persisted specialist completion skips finished work on resume.
