@@ -6,10 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStore } from "../src/store.ts";
 
-const theme: GrillTheme = {
-  fg: (_tone, value) => value,
-  symbol: () => "",
-};
+const theme = {
+  fg: (_tone: string, value: string) => value,
+  symbols: { symbol: () => "" },
+} as unknown as GrillTheme;
 
 function state(): GrillState {
   return {

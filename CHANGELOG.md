@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Migrate terminal views, tool/message renderers, and completions to OMP 19.2.1's UI host, keyboard decoder, theme, and text-width APIs; retain browser behavior and interview flows.
 - Finish now tells the owning OMP session: a `Grill finished` message with the report path. Previously a browser Finish never reached the agent. **Finish & hand off to agent** (browser dialog, `f` then `h` in the terminal, `/grill finish handoff`) also starts an agent turn to plan and implement from the report. Plain Finish starts no turn. Finish and Next are disabled once the interview is finished.
 - Terminal inspector: hide the duplicate status widget while it is open, label status plainly (`your turn`, `agent thinking`), show the error reason and resume hint, show `N staged · enter sends` in the header, report when Enter has nothing to send, and shorten key hints (`?` shows the rest).
 - Add opt-in multi-select questions for independent choices, with checkbox toggles in the browser, letter toggles in the terminal inspector, and comma-separated `/grill answer` IDs. Preserve picks and notes through autosave, reload, edits, history, and recovery; reports, ADRs, and beads exports include every selected choice. Single-select questions remain unchanged.

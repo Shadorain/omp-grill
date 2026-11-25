@@ -3,6 +3,13 @@
 `bun test` runs everything; `bun run typecheck` (`tsc --noEmit`) must stay clean.
 `bun run demo` launches a scripted local provider for manual browser checks.
 
+For an OMP 19.2+ terminal smoke check, start `/grill <topic>`, then run
+`/grill tui`. Confirm the status widget hides while the inspector is open,
+question navigation and option staging still work, `i`/`m` drafts save and
+send with Enter, `?` shows key help, and Esc closes the inspector while the
+browser interview stays open. Also open the printed URL and stage/send a browser
+answer to confirm both views still share the same session.
+
 ## Layout
 
 | File | Covers |

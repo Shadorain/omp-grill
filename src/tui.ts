@@ -1,15 +1,13 @@
 import { selectedOptions } from "./answers.ts";
-import type { Component } from "@oh-my-pi/pi-tui";
-import { replaceTabs, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
+import type { ExtensionTheme } from "@oh-my-pi/pi-coding-agent";
+import { replaceTabs, truncate } from "@oh-my-pi/pi-tui/text/width";
+import { decodeKey } from "@oh-my-pi/pi-tui/driver/input/keys";
 import type { GrillState } from "./types.ts";
 
-export interface GrillTheme {
-  fg(tone: string, value: string): string;
-  symbol?(key: string): string;
-}
+export type GrillTheme = ExtensionTheme;
 
 export interface GrillKeys {
-  matches(data: string, action: string): boolean;
+  matches(data: string, action: "tui.select.cancel" | "tui.select.up" | "tui.select.down" | "tui.select.confirm"): boolean;
 }
 
 export interface GrillTuiActions {
@@ -26,6 +24,7 @@ export interface GrillTuiActions {
 }
 
 const LETTERS = "abcdefghijklmnopqrstuvwxyz";
+const CONTROL_TEXT: Record<string, string> = { enter: "\r", escape: "\x1b", backspace: "\x7f", tab: "\t" };
 /** Letters bound to commands, so they never stage an option. */
 const COMMAND_KEYS: Record<string, true> = { e: true, f: true, i: true, j: true, k: true, m: true, q: true, x: true };
 /** Matches the store's text cap, so a draft cannot be rejected on save. */
@@ -45,7 +44,7 @@ const STATUS_LABEL: Record<GrillState["status"], string> = {
 };
 
 function clip(value: string, width: number): string {
-  return truncateToWidth(replaceTabs(value), Math.max(1, width));
+  return truncate(replaceTabs(value), Math.max(1, width));
 }
 
 function paint(theme: GrillTheme, tone: string, value: string): string {
@@ -53,7 +52,7 @@ function paint(theme: GrillTheme, tone: string, value: string): string {
 }
 
 function glyph(theme: GrillTheme, key: string, fallback: string): string {
-  return theme.symbol?.(key) || fallback;
+  return theme.symbols.symbol(key) || fallback;
 }
 
 function dot(theme: GrillTheme): string {
@@ -71,7 +70,7 @@ const WIDGET_TITLE_WIDTH = 32;
 
 export function grillWidgetTitle(state: GrillState): string {
   const topic = replaceTabs(state.topic).replace(/\s+/g, " ").trim();
-  return truncateToWidth(topic || "Grill", WIDGET_TITLE_WIDTH);
+  return truncate(topic || "Grill", WIDGET_TITLE_WIDTH);
 }
 
 export interface GrillWidgetOptions {
@@ -103,21 +102,21 @@ export function grillWidgetLines(
   return lines;
 }
 
-export class GrillWidget implements Component {
+export class GrillWidget {
   constructor(
     private readonly getState: () => GrillState | undefined,
     private readonly theme: GrillTheme,
     private readonly getOptions: () => GrillWidgetOptions = () => ({}),
   ) {}
-  render(width: number): string[] {
+  render(width: number): readonly string[] {
     const state = this.getState();
     if (!state) return [];
     return grillWidgetLines(state, width, this.theme, this.getOptions());
   }
-  invalidate(): void {}
+  dispose(): void {}
 }
 
-export class GrillInspector implements Component {
+export class GrillInspector {
   private selected = 0;
   private view: "questions" | "discussion" = "questions";
   private confirmFinish = false;
@@ -238,11 +237,19 @@ export class GrillInspector implements Component {
   invalidate(): void {}
 
   handleInput(data: string): void {
+    const key = decodeKey(data, { kitty: true, backspaceIsCtrl: false });
+    if (key?.kind === "release") return;
+    const id = key?.id ?? data;
+    const text = key?.text ?? CONTROL_TEXT[id] ?? id;
+    this.handleKey(text, id);
+  }
+
+  private handleKey(data: string, id: string): void {
     if (this.editing) {
       this.editText(data);
       return;
     }
-    if (this.keys.matches(data, "tui.select.cancel") || data === "q" || data === "\u001b") {
+    if (this.keys.matches(id, "tui.select.cancel") || data === "q" || data === "\u001b") {
       this.actions.close();
       return;
     }
@@ -256,12 +263,12 @@ export class GrillInspector implements Component {
       return;
     }
     const questions = this.questions();
-    if (this.keys.matches(data, "tui.select.up") || data === "k") {
+    if (this.keys.matches(id, "tui.select.up") || data === "k") {
       this.selected = Math.max(0, this.selected - 1);
       this.confirmFinish = false;
       return;
     }
-    if (this.keys.matches(data, "tui.select.down") || data === "j") {
+    if (this.keys.matches(id, "tui.select.down") || data === "j") {
       this.selected = Math.min(Math.max(0, questions.length - 1), this.selected + 1);
       this.confirmFinish = false;
       return;
@@ -300,7 +307,7 @@ export class GrillInspector implements Component {
         this.note = state.error || "Agent is working. Drafts stay editable; wait for acknowledgement.";
         return;
       }
-      if (this.keys.matches(data, "tui.select.confirm") || data === "\r" || data === "\n") {
+      if (this.keys.matches(id, "tui.select.confirm") || data === "\r" || data === "\n") {
         this.note = this.actions.send() ? "Sent staged answers." : "Nothing staged. Pick an option or press i to write first.";
         return;
       }

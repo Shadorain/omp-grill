@@ -26,7 +26,7 @@ async function fixture(allowAgentStart?: boolean, modelRegistry?: Pick<Extension
   let command: any;
   let queued = false;
   const urls: string[] = [];
-  let inspector: { handleInput(data: string): void; render(width: number): string[] } | undefined;
+  let inspector: { handleInput(data: string): void; render(width: number): readonly string[] } | undefined;
   const notices: string[] = [];
   const messages: any[] = [];
   const deliveries: unknown[] = [];
@@ -70,10 +70,19 @@ async function fixture(allowAgentStart?: boolean, modelRegistry?: Pick<Extension
       setStatus() {},
       setWidget() {},
       custom(factory: any) {
+        const noopTheme = {
+          fg: (_tone: string, text: string) => text,
+          symbols: { symbol: () => "" },
+          bold: (text: string) => text,
+          italic: (text: string) => text,
+          underline: (text: string) => text,
+          strikethrough: (text: string) => text,
+          inverse: (text: string) => text,
+        };
         inspector = factory(
-          { requestRender() {}, terminal: { rows: 50 } },
-          { fg: (_tone: string, text: string) => text },
-          { matches: () => false },
+          { requestRender() {}, size: () => ({ columns: 80, rows: 50 }), suspend: async (run: () => Promise<unknown>) => run() },
+          noopTheme,
+          { matchesId: () => false },
           () => {},
         );
       },

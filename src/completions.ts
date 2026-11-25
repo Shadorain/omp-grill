@@ -1,4 +1,4 @@
-import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
+import type { AutocompleteItem } from "@oh-my-pi/pi-coding-agent/autocomplete/autocomplete";
 
 export interface CompletionGrill {
   id: string;

@@ -7,7 +7,7 @@
 <p>Design interviews in your browser or OMP terminal.</p>
 
 <p>
-  <a href="https://github.com/can1357/oh-my-pi"><img src="https://img.shields.io/badge/OMP-18.4.4%2B-a78bfa?style=for-the-badge" alt="OMP 18.4.4 or later"></a>
+  <a href="https://github.com/can1357/oh-my-pi"><img src="https://img.shields.io/badge/OMP-19.2.1%2B-a78bfa?style=for-the-badge" alt="OMP 19.2.1 or later"></a>
   <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-f9f1e1?style=for-the-badge&amp;logo=bun&amp;logoColor=f9f1e1" alt="Bun runtime"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-69b7ff?style=for-the-badge" alt="MIT license"></a>
 </p>
@@ -71,7 +71,7 @@ Stage options, write answers, and discuss questions without leaving OMP.
 
 ## Quick start
 
-Requires [OMP](https://github.com/can1357/oh-my-pi) 18.4.4 or later. Run these commands inside OMP:
+Requires [OMP](https://github.com/can1357/oh-my-pi) 19.2.1 or later. Run these commands inside OMP:
 
 ```text
 /marketplace add Shadorain/omp-grill
@@ -160,7 +160,7 @@ Include a full Linear issue URL in the interview topic if you want the parent ep
 
 ## Terminal
 
-Run `/grill tui` for the selected interview, or `/grill tui <topic>` to start one in the terminal. The browser remains available. As in the browser, drafting and saving edits use no model tokens; Send batches them for the agent.
+Run `/grill tui` for the selected interview, or `/grill tui <topic>` to start one in the terminal. OMP 19.2.1+ renders the inspector through its UI host, keyboard decoder, configured selector bindings, and explicit repaint requests; the browser remains available. As in the browser, drafting and saving edits use no model tokens; Send batches them for the agent.
 
 | Key | Action |
 | --- | --- |

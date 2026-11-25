@@ -1,7 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
- import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import { Text } from "@oh-my-pi/pi-tui";
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
  import { grillCompletions } from "./completions.ts";
  import {
    createStore,
@@ -12,7 +11,7 @@ import { Text } from "@oh-my-pi/pi-tui";
  } from "./store.ts";
  import { startServer } from "./server.ts";
  import { listSessions, resumeStore } from "./sessions.ts";
- import { createGrillInspector, createGrillWidget, grillWidgetTitle, type GrillTheme } from "./tui.ts";
+import { createGrillInspector, createGrillWidget, grillWidgetTitle } from "./tui.ts";
  import type { Action, DraftAnswer, GrillServer, InterviewContext, Publish, SessionSummary, Store, Submission } from "./types.ts";
 import {
   displaySettingsPath,
@@ -250,9 +249,9 @@ export default function grillExtension(pi: ExtensionAPI) {
     }
     ctx.ui.setWidget(
       "omp-grill",
-      (_tui, theme) => createGrillWidget(
+      (_ui, theme) => createGrillWidget(
         () => runtimeOf(currentId)?.store.state,
-        theme as GrillTheme,
+        theme,
         () => ({ expanded, url: runtimeOf(currentId)?.server?.url }),
       ),
       { placement: "aboveEditor" },
@@ -433,52 +432,59 @@ export default function grillExtension(pi: ExtensionAPI) {
   async function openTui(ctx: ExtensionContext) {
     if (!ctx.hasUI) throw new Error("Session TUI needs the interactive terminal.");
     owned(ctx);
-    await ctx.ui.custom((tui, theme, keys, done) => {
-      overlayTui = tui;
+    await ctx.ui.custom((ui, theme, keys, done) => {
+      overlayTui = ui;
       syncWidget(ctx);
-      return createGrillInspector(
+      const inspector = createGrillInspector(
         () => runtimeOf(currentId)?.store.state,
         {
           close: () => done(undefined),
           stage: (questionId, optionId) => {
             const current = runtimeOf(currentId);
             if (current) stageDraft(current, questionId, optionId);
-            tui.requestRender();
+            ui.requestRender();
           },
           write: (questionId, kind, text) => {
             const current = runtimeOf(currentId);
             if (current) writeDraft(current, questionId, kind, text);
-            tui.requestRender();
+            ui.requestRender();
           },
           send: () => {
             const current = runtimeOf(currentId);
             const sent = current ? sendDrafts(current) : false;
-            tui.requestRender();
+            ui.requestRender();
             return sent;
           },
           finish: (handoff) => {
             const current = runtimeOf(currentId);
             if (!current) return;
             finishRuntime(current, handoff);
-            tui.requestRender();
+            ui.requestRender();
           },
           explore: (questionId) => {
             const current = runtimeOf(currentId);
             if (!current) return;
             wake(current, current.store.submit([{ type: "explore", q: questionId }]));
-            tui.requestRender();
+            ui.requestRender();
           },
           defer: (questionId, until) => {
             const current = runtimeOf(currentId);
             if (!current) return;
             wake(current, current.store.submit([{ type: "defer", q: questionId, ...(until ? { until } : {}) }]));
-            tui.requestRender();
+            ui.requestRender();
           },
         },
-        () => tui.terminal.rows,
-        theme as GrillTheme,
-        keys,
+        () => ui.size().rows,
+        theme,
+        { matches: (data, action) => keys.matchesId(data, action) },
       );
+      return {
+        render: (width: number) => inspector.render(width),
+        handleInput(data: string) {
+          inspector.handleInput(data);
+          ui.requestRender();
+        },
+      };
     });
     overlayTui = undefined;
     syncWidget(ctx);
@@ -790,7 +796,7 @@ export default function grillExtension(pi: ExtensionAPI) {
     approval: "write",
     parameters: schemas.publish,
     renderCall(params, options) {
-      if (options.expanded) return new Text(JSON.stringify(params, null, 2), 0, 0);
+      if (options.expanded) return JSON.stringify(params, null, 2);
       const patch = params as Publish & { id?: string };
       const parts = [
         patch.questions?.length ? `${patch.questions.length} questions` : "",
@@ -800,7 +806,7 @@ export default function grillExtension(pi: ExtensionAPI) {
         patch.prototype ? "prototype" : "",
         patch.handled !== undefined ? `ack ${patch.handled}` : "",
       ].filter(Boolean);
-      return new Text(`Grill · ${parts.join(" · ") || "update"}${patch.id ? ` · ${patch.id.slice(0, 8)}` : ""}`, 0, 0);
+      return `Grill · ${parts.join(" · ") || "update"}${patch.id ? ` · ${patch.id.slice(0, 8)}` : ""}`;
     },
     async execute(_id, params, _signal, _onUpdate, ctx) {
       // OMP validates the injected schema, whose compatibility types infer unknown.
@@ -865,13 +871,11 @@ export default function grillExtension(pi: ExtensionAPI) {
   });
 
   pi.registerMessageRenderer<{ summary: string }>("omp-grill.submission", (message, options, theme) =>
-    new Text(options.expanded
+    options.expanded
       ? (typeof message.content === "string" ? message.content : JSON.stringify(message.content, null, 2))
-      : theme.fg("accent", message.details?.summary ?? "Grill submission"), 0, 0));
-  pi.registerMessageRenderer<{ title: string; url: string }>("omp-grill.ready", (message, _options, theme) =>
-    new Text(`${theme.fg("success", `Grill ready · ${message.details?.title ?? ""}`)}\n${message.details?.url ?? ""}`, 0, 0));
+      : theme.fg("accent", message.details?.summary ?? "Grill submission"));
   pi.registerMessageRenderer<{ title: string; report: string; handoff: boolean }>("omp-grill.finished", (message, _options, theme) =>
-    new Text(`${theme.fg("success", `Grill finished · ${message.details?.title ?? ""}${message.details?.handoff ? " · handed off" : ""}`)}\n${message.details?.report ?? ""}`, 0, 0));
+    `${theme.fg("success", `Grill finished · ${message.details?.title ?? ""}${message.details?.handoff ? " · handed off" : ""}`)}\n${message.details?.report ?? ""}`);
   pi.registerShortcut("ctrl+alt+g", {
     description: "Expand Grill status and private URL",
     handler(ctx) {
